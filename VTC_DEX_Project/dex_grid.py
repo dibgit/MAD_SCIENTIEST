@@ -2,6 +2,8 @@ import os
 import asyncio
 import struct
 import csv
+import time
+import subprocess
 import numpy as np
 from dotenv import load_dotenv
 from solders.pubkey import Pubkey
@@ -25,6 +27,9 @@ BASE_USDC_PER_BUCKET = 1000.0 / 257
 
 # Set to True to overwrite live oracle feeds with an automated simulation price pump
 RUN_SIMULATION_PRICE_SHIFTER = True
+
+# The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
+GIT_VAULT_COOLDOWN_SECONDS = 300
 
 def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, direction: str, steps_moved: int, sol_total: float, usdc_total: float):
     """
@@ -220,6 +225,45 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
     print(f"[SIMULATION SHIFTER] Active Cycle Wave Price Target: ${simulated_price:,.4f}")
     return simulated_price
 
+def execute_automated_git_vault(tick_id: int, current_step: int, market_price: float, last_vault_time: float) -> float:
+    """
+    Automates local repository updates using a strict time-locked pacing threshold configuration.
+    Prevents thread blocking during high-frequency volatility cycles.
+    """
+    current_time = time.time()
+    elapsed_time = current_time - last_vault_time
+    
+    # Check if the system time constraints have been cleared
+    if elapsed_time < GIT_VAULT_COOLDOWN_SECONDS:
+        # Time threshold has not been cleared yet; pass execution parameters back to main track safely
+        return last_vault_time
+        
+    repo_directory = r"D:\MAD_SCIENTIEST"
+    commit_message = f"Vault Update: Tick #{tick_id} | Active Step: {current_step} | Market Benchmark: ${market_price:.2f}"
+    
+    print(f"[GIT VAULT] System cooldown cleared ({int(elapsed_time)}s elapsed). Initializing background sync...")
+    
+    try:
+        # Execute background processes using thin execution masks
+        subprocess.run(["git", "add", "VTC_DEX_Project/dex_grid.py", "VTC_DEX_Project/grid_ledger.csv"], 
+                       cwd=repo_directory, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        subprocess.run(["git", "commit", "-m", commit_message], 
+                       cwd=repo_directory, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        subprocess.run(["git", "push", "origin", "main"], 
+                       cwd=repo_directory, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        print(f"[GIT VAULT] Repository state securely synchronized to remote main branch.")
+        # Return the new current time to reset the 5-minute cooldown clock anchor point
+        return current_time
+    except subprocess.CalledProcessError:
+        print(f"[GIT VAULT] Check skipped: No new structural asset adjustments to log.")
+        return last_vault_time
+    except Exception as e:
+        print(f"[ERROR] Automated vault interface routine failure: {e}")
+        return last_vault_time
+
 async def main():
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
@@ -253,6 +297,15 @@ async def main():
         previous_tier_index = None
         loop_counter = 0
         
+        # Initialize tracking memory states
+        previous_tier_index = None
+        loop_counter = 0
+        
+        # INJECT THIS: Initialize your vault backup clock to the starting execution epoch timestamp integer
+        last_git_vault_timestamp = time.time()
+        
+        print("[LOOP START] Monitoring Price Crossings Across Matrix Ranges")
+
         while True:
             loop_counter += 1
             live_price = await fetch_onchain_price(client, "SOL/USD")
@@ -276,7 +329,6 @@ async def main():
                     print(f"[CROSSING DETECTED] Index Shift Detected: {direction} By: {steps_moved} Tiers")
                     
                     # Simulation: execute transaction balance shifts between crossed tiers
-                    # Your current UPWARD trading loop block inside main():
                     if direction == "UPWARD":
                         for step in range(previous_tier_index, current_tier_index + 1):
                             if sol_stock[step] > 0:
@@ -298,10 +350,9 @@ async def main():
                                 print(f"  [SIMULATED TRADED] Bought step {step+1} inventory: {asset_bought:.4f} SOL")
 
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
-                                        # Your current transaction logging block inside main():
-                    print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
                     # INJECT THE NEW LOGGER HERE: Pass all current system states directly to your CSV file
+              
                     log_transaction_to_csv(
                         loop_id=loop_counter,
                         live_price=live_price,
@@ -311,9 +362,19 @@ async def main():
                         sol_total=np.sum(sol_stock),
                         usdc_total=np.sum(usdc_stock)
                     )
-
-                    # Keep your tracking variables updated
+                    
+                    # THE TIME-LOCKED UPGRADE OVERRIDE:
+                    # Executes the check and re-assigns the updated timestamp balance variables back to memory maps
+                    last_git_vault_timestamp = execute_automated_git_vault(
+                        tick_id=loop_counter,
+                        current_step=current_tier_index + 1,
+                        market_price=live_price,
+                        last_vault_time=last_git_vault_timestamp
+                    )
+                    
+                    # Update state tracking memory variable
                     previous_tier_index = current_tier_index
+
                 else:
                     print(f"[TICK CHECK #{loop_counter}] Steady inside Step {current_tier_index+1}/257. (Market Price: ${live_price:,.4f})")
             
