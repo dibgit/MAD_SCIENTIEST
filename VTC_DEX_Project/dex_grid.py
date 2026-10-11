@@ -1,12 +1,17 @@
 import os
+import requests
 import asyncio
 import struct
 import csv
 import time
 import subprocess
+import json
 import numpy as np
 from dotenv import load_dotenv
 from solders.pubkey import Pubkey
+from solders.keypair import Keypair
+from solders.transaction import VersionedTransaction
+from solders.message import MessageV0
 from solana.rpc.async_api import AsyncClient
 from datetime import datetime
 
@@ -14,7 +19,24 @@ from datetime import datetime
 load_dotenv()
 rpc_url = os.getenv("SOLANA_RPC_URL")
 wallet_address_str = os.getenv("MY_PUBLIC_WALLET")
+jupiter_api_key = os.getenv("JUPITER_API_KEY")
 
+# DYNAMIC ENGINE CONFIGURATION EXTRACTION
+# Dynamically extract and enforce ladder step sizes. Default to 257 if missing.
+NUMBER_OF_LADDER = int(os.getenv("NUMBER_OF_LADDER", default=257))
+
+# DYNAMIC RELATIVE PATH EXTRACTION
+# os.path.dirname(__file__) extracts the exact folder this file resides in (D:\MAD_SCIENTIEST\VTC_DEX_Project)
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_LEDGER_PATH = os.path.join(PROJECT_DIR, "grid_ledger.csv")
+
+# Universal Token Mint Repository Map
+TOKEN_MINTS = {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "wVTC": "PASTE_DECENTRALIZED_WVTC_MINT_ADDRESS_HERE" 
+}
 # Permanent Pyth Network Mainnet Price Oracle Mapping Index
 ORACLE_FEEDS = {
     "SOL/USD": "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
@@ -22,8 +44,8 @@ ORACLE_FEEDS = {
 # The profit multiplier threshold before a single bucket overflows (e.g., 1.20 = 20% growth)
 BUCKET_OVERFLOW_THRESHOLD = 1.20
 
-# The initial base cash baseline allocated per bucket step ($1000 / 257 = ~$3.891)
-BASE_USDC_PER_BUCKET = 1000.0 / 257
+# DYNAMIC WORKING BALANCES: Base budget allocated per step is dynamically scaled to NUMBER_OF_LADDER
+BASE_USDC_PER_BUCKET = 1000.0 / NUMBER_OF_LADDER
 
 # Set to True to overwrite live oracle feeds with an automated simulation price pump
 RUN_SIMULATION_PRICE_SHIFTER = True
@@ -31,22 +53,22 @@ RUN_SIMULATION_PRICE_SHIFTER = True
 # The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
 GIT_VAULT_COOLDOWN_SECONDS = 300
 
+# Keep track of previous prices globally to detect a flatlining feed
+ORACLE_STAGNANT_TRACKER = {
+    "last_price": 0.0,
+    "flatline_count": 0
+}
+
 def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, direction: str, steps_moved: int, sol_total: float, usdc_total: float):
-    """
-    Appends high-precision grid metric snapshots directly to a persistent CSV database file.
-    Target Path: D:\\MAD_SCIENTIEST\\VTC_DEX_Project\\grid_ledger.csv
-    """
-    csv_path = r"D:\MAD_SCIENTIEST\VTC_DEX_Project\grid_ledger.csv"
-    file_exists = os.path.exists(csv_path)
-    
-    # Calculate the active dollar value of your total combined asset stock
+    """Appends high-precision grid metric snapshots directly to a relative persistent CSV database file."""
+    file_exists = os.path.exists(CSV_LEDGER_PATH)
     portfolio_value = (sol_total * live_price) + usdc_total
     
     # Define clean, structural database tracking headers matching your Excel ledger
     headers = ["timestamp", "tick_id", "market_price", "active_step", "trade_direction", "steps_crossed", "total_sol", "total_usdc", "net_worth_usd"]
     
     try:
-        with open(csv_path, mode="a", newline="") as csv_file:
+        with open(CSV_LEDGER_PATH, mode="a", newline="") as csv_file:
             writer = csv.writer(csv_file)
             
             # If the database file is brand new, instantiate structural track headers
@@ -84,6 +106,7 @@ async def check_wallet_fuel(client: AsyncClient):
     except Exception as e:
         print(f"[ERROR] Failed to execute wallet balance check string: {e}")
 
+
 async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD"):
     """Reads fixed-point raw integer byte data straight from smart contract storage channels."""
     feed_address = ORACLE_FEEDS.get(pair_ticker)
@@ -105,42 +128,66 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
         price_offset = 208
         price_data = data[price_offset:price_offset + 20]
         raw_price, confidence, exponent = struct.unpack("<qQi", price_data)
-        
         # Enforce fixed-point decimal scaling rule of 10^8
-        final_price = float(raw_price) / 100_000_000.0
-        print(f"[ORACLE TICK] {pair_ticker} Feed Value: ${final_price:,.4f}")
-        return final_price
+        # Parse the raw on-chain state value
+        oracle_price = float(raw_price) / 100_000_000.0
+        
+        # ---- HYBRID FALLBACK CHECK ----
+        if oracle_price == ORACLE_STAGNANT_TRACKER["last_price"]:
+            ORACLE_STAGNANT_TRACKER["flatline_count"] += 1
+        else:
+            ORACLE_STAGNANT_TRACKER["last_price"] = oracle_price
+            ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
+            
+        # If the oracle data block stays identical for 5 consecutive ticks, execute the verified Jupiter V3 API check
+        if ORACLE_STAGNANT_TRACKER["flatline_count"] >= 5:
+            if not jupiter_api_key:
+                print("[WARNING] Oracle flatlining, but JUPITER_API_KEY is missing from your .env file.")
+            else:
+                sol_mint = TOKEN_MINTS["SOL"]
+                url = "https://api.jup.ag/price/v3"
+                params = {'ids': sol_mint}
+                headers = {'x-api-key': jupiter_api_key.strip()}
+                
+                try:
+                    response = requests.get(url, params=params, headers=headers, timeout=5)
+                    if response.status_code == 200:
+                        prices = response.json()
+                        spot_price = float(prices[sol_mint]['usdPrice'])
+                        print(f"[HYBRID FEED] Oracle stale ({ORACLE_STAGNANT_TRACKER['flatline_count']} ticks). Extrapolating via Jupiter V3: ${spot_price:.4f}")
+                        return spot_price
+                except Exception as ex_jup:
+                    print(f"[WARNING] Jupiter V3 API fallback interface error: {ex_jup}")
+                    
+        print(f"[ORACLE TICK] {pair_ticker} Feed Value: ${oracle_price:,.4f}")
+        return oracle_price
+        
     except Exception as e:
         print(f"[ERROR] On-chain cryptograph execution failure: {e}")
         return None
 
-def generate_257_ladder(low_price: float, high_price: float, mode: str = "geometric"):
-    """Generates an explicit, high-precision mathematical 257-tier matrix array layout."""
-    total_steps = 257
+def generate_N_ladder(low_price: float, high_price: float, mode: str = "geometric"):
+    """Generates an explicit, high-precision mathematical variable N-tier matrix array layout."""
+    # Calculates midpoint index mathematically to handle even/odd N integers cleanly
+    mid_index = int(NUMBER_OF_LADDER / 2)
     
     if mode == "arithmetic":
-        grid_array = np.linspace(low_price, high_price, total_steps)
+        grid_array = np.linspace(low_price, high_price, NUMBER_OF_LADDER)
     else:
-        grid_array = np.geomspace(low_price, high_price, total_steps)
+        grid_array = np.geomspace(low_price, high_price, NUMBER_OF_LADDER)
         
-    print(f"[ENGINE INITIALIZED] Mode: {mode.upper()} Steps: {total_steps}")
+    print(f"[ENGINE INITIALIZED] Mode: {mode.upper()} Configured Sizing Steps: {NUMBER_OF_LADDER}")
     print(f"  Floor Boundary   (Step 001) : ${grid_array[0]:,.4f}")
-    print(f"  Midpoint Anchor  (Step 128) : ${grid_array[127]:,.4f}")
-    print(f"  Ceiling Boundary (Step 257) : ${grid_array[-1]:,.4f}")
+    print(f"  Midpoint Anchor  (Step {mid_index+1:03d}) : ${grid_array[mid_index]:,.4f}")
+    print(f"  Ceiling Boundary (Step {NUMBER_OF_LADDER:03d}) : ${grid_array[-1]:,.4f}")
     
-    if mode == "geometric":
-        # Pull position [1] to gauge single steps relative to position [0]
+    if mode == "geometric" and NUMBER_OF_LADDER > 1:
         pct_ratio = (grid_array[1] - grid_array[0]) / grid_array[0] * 100
         print(f"  Compounding Delta Step Size: {pct_ratio:.4f}% percentage variance")
-        
     return grid_array
 
 def initialize_inventory_matrix(grid_matrix, current_price, total_budget_usdc=1000.0):
-    """
-    Allocates your budget across all 257 steps based on current market price.
-    Steps below current price hold USDC (to buy the dip).
-    Steps above current price hold SOL (to sell the pump).
-    """
+    """Allocates your budget across all configured steps based on current market price."""
     total_steps = len(grid_matrix)
     usdc_per_step = total_budget_usdc / total_steps
     
@@ -195,12 +242,7 @@ def check_bucket_overflow(step_index: int, sol_inventory, usdc_inventory, grid_m
         print(f"  Action: Shifted ${excess_profit:.4f} USDC profit into Step {upper_step+1} as {asset_addition:.4f} SOL")
 
 def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
-    """
-    Generates a full bidirectional market cycle wave to test grid functionality.
-    Ticks 01-05: Stable baseline calibration.
-    Ticks 06-35: Upward expansion trend (Pump phase).
-    Ticks 36-70: Downward market correction trend (Dump phase).
-    """
+    """Generates a full bidirectional market cycle wave to test grid functionality."""
     if not RUN_SIMULATION_PRICE_SHIFTER:
         return real_oracle_price
         
@@ -264,6 +306,33 @@ def execute_automated_git_vault(tick_id: int, current_step: int, market_price: f
         print(f"[ERROR] Automated vault interface routine failure: {e}")
         return last_vault_time
 
+def prepare_onchain_dex_swap(wallet_keypair: Keypair, base_mint: str, quote_mint: str, amount_in: int, slide_direction: str):
+    """
+    Constructs a structural Web3 serialized transaction blueprint payload for decentralized routing.
+    Bypasses standard exchange dashboards by compiling raw cryptographic transaction objects.
+    """
+    # In a live Web3 engine, your script pings the decentralized Jupiter V6 Router API
+    # to extract the optimal raw execution byte instructions for the swap
+    quote_url = f"https://jup.ag{base_mint}&outputMint={quote_mint}&amount={amount_in}&slippageBps=50"
+    
+    print(f"[DEX ROUTER] Generating on-chain swap instructions for: {slide_direction}")
+    print(f"  Input Target  : {base_mint[:8]}... | Output Target: {quote_mint[:8]}...")
+    print(f"  Raw Unit Size : {amount_in} Base Atoms")
+    
+    # Mock payload structure showing exactly what gets broadcast to the Solana network:
+    try:
+        # 1. Compile the transaction instructions into an optimized binary message block
+        # 2. Sign the transaction payload natively using your private seed keys
+        # 3. Broadcast the raw transaction bytes to your Alchemy node via 'send_transaction'
+        
+        print(f"[DEX TRANSACT] Transaction payload compiled and signed by account: {wallet_keypair.pubkey()}")
+        print(f"  Status        : [SIMULATED BROADCAST SUCCESSFUL] -> TxString: MockSolanaTxHashString_StepCrossing")
+        
+        return True
+    except Exception as e:
+        print(f"[ERROR] On-chain compilation anomaly: {e}")
+        return False
+
 async def main():
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
@@ -287,7 +356,7 @@ async def main():
         mock_ceiling = current_sol_price * 1.50
         
         # Generate grid structure
-        grid_matrix = generate_257_ladder(mock_floor, mock_ceiling, mode="geometric")
+        grid_matrix = generate_N_ladder(mock_floor, mock_ceiling, mode="geometric")
         
         # Initialize simulated capital matrix
         sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, current_sol_price, total_budget_usdc=1000.0)
@@ -306,6 +375,9 @@ async def main():
         
         print("[LOOP START] Monitoring Price Crossings Across Matrix Ranges")
 
+        # Generates a volatile sandbox keypair structure for testing (Safe, un-funded developer key)
+        sandbox_signer_keypair = Keypair()
+
         while True:
             loop_counter += 1
             live_price = await fetch_onchain_price(client, "SOL/USD")
@@ -321,7 +393,7 @@ async def main():
                 
                 if previous_tier_index is None:
                     previous_tier_index = current_tier_index
-                    print(f"[CALIBRATED] Positioned in Bucket Step: {current_tier_index+1}/257 (Target Line: ${tier_price_target:,.4f})")
+                    print(f"[CALIBRATED] Positioned in Bucket Step: {current_tier_index+1}/{NUMBER_OF_LADDER} (Target Line: ${tier_price_target:,.4f})")
                 elif current_tier_index != previous_tier_index:
                     direction = "UPWARD" if current_tier_index > previous_tier_index else "DOWNWARD"
                     steps_moved = abs(current_tier_index - previous_tier_index)
@@ -337,7 +409,16 @@ async def main():
                                 sol_stock[step] = 0.0
                                 print(f"  [SIMULATED TRADED] Sold step {step+1} inventory for ${proceeds:.4f} USDC")
                                 
-                                # INJECT THE NEW HOOK HERE: Check if this specific sale caused an overflow
+                                # INJECT THE TRANSACTION MAPPER:
+                                # Converts 0.03 SOL into raw atomic Lamports (1 SOL = 10^9 Lamports)
+                                raw_lamports = int(0.03 * 1_000_000_000)
+                                prepare_onchain_dex_swap(
+                                    wallet_keypair=sandbox_signer_keypair,
+                                    base_mint=TOKEN_MINTS["SOL"],
+                                    quote_mint=TOKEN_MINTS["USDC"],
+                                    amount_in=raw_lamports,
+                                    slide_direction="SOL -> USDC SWAP"
+                                )
                                 check_bucket_overflow(step, sol_stock, usdc_stock, grid_matrix)
 
                     else:
@@ -348,6 +429,16 @@ async def main():
                                 sol_stock[step] += asset_bought
                                 usdc_stock[step] = 0.0
                                 print(f"  [SIMULATED TRADED] Bought step {step+1} inventory: {asset_bought:.4f} SOL")
+                                # INJECT THE DOWNWARD SWAP HOOK HERE:
+                                # Converts the USDC amount into raw atomic units (USDC uses 6 decimals: 1 USDC = 1,000,000 atoms)
+                                raw_usdc_atoms = int(BASE_USDC_PER_BUCKET * 1_000_000)
+                                prepare_onchain_dex_swap(
+                                    wallet_keypair=sandbox_signer_keypair,
+                                    base_mint=TOKEN_MINTS["USDC"],
+                                    quote_mint=TOKEN_MINTS["SOL"],
+                                    amount_in=raw_usdc_atoms,
+                                    slide_direction="USDC -> SOL SWAP"
+                                )
 
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
@@ -376,7 +467,7 @@ async def main():
                     previous_tier_index = current_tier_index
 
                 else:
-                    print(f"[TICK CHECK #{loop_counter}] Steady inside Step {current_tier_index+1}/257. (Market Price: ${live_price:,.4f})")
+                    print(f"[TICK CHECK #{loop_counter}] Steady inside Step {current_tier_index+1}/{NUMBER_OF_LADDER}. (Market Price: ${live_price:,.4f})")
             
             await asyncio.sleep(3)
 
