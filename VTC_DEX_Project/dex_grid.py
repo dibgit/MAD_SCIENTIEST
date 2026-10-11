@@ -1,9 +1,12 @@
 import os
+import sys
 import requests
 import asyncio
 import struct
 import csv
 import time
+import logging
+from logging.handlers import RotatingFileHandler
 import subprocess
 import json
 import numpy as np
@@ -30,6 +33,72 @@ NUMBER_OF_LADDER = int(os.getenv("NUMBER_OF_LADDER", default=257))
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_LEDGER_PATH = os.path.join(PROJECT_DIR, "grid_ledger.csv")
 
+# PRODUCTION DIRECTORY ENFORCEMENT & ENGINE CONFIGURATION
+DATA_DIR = os.path.join(PROJECT_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Extract and scale configuration metrics for rotating file buffers
+MAX_LOG_SIZE_BYTES = int(os.getenv("MAX_LOG_SIZE_KB", default=10)) * 1024
+MAX_LOG_BACKUPS = int(os.getenv("MAX_LOG_BACKUPS", default=10))
+LOG_FILE_BASE_PATH = os.path.join(DATA_DIR, "messages.log")
+
+# Custom stream interceptor routing log logic to console & file buffers simultaneously
+class MasterStreamLogger:
+    def __init__(self, original_stream, file_logger):
+        self.original_stream = original_stream
+        self.file_logger = file_logger
+
+    def write(self, message):
+        # Stream raw text directly to native PowerShell window console lanes
+        self.original_stream.write(message)
+        self.original_stream.flush()
+        
+        # Filter terminal spacer newlines from cluttering clean text log strings
+        cleaned_msg = message.strip()
+        if cleaned_msg:
+            self.file_logger.info(cleaned_msg)
+
+    def flush(self):
+        self.original_stream.flush()
+
+# Define structural layout definitions for rotating handlers
+class SequentialLogNamer(RotatingFileHandler):
+    """Custom file naming strategy handler to enforce sequential index suffixes: messages0.log, messages1.log..."""
+    def do_rollover(self):
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+            
+        # Execute downset shifting logic across historic logs sequentially up to limit boundaries
+        for i in range(self.backupCount - 1, -1, -1):
+            sfn = os.path.join(DATA_DIR, f"messages{i}.log" if i > 0 else "messages.log")
+            dfn = os.path.join(DATA_DIR, f"messages{i+1}.log")
+            if os.path.exists(sfn):
+                if os.path.exists(dfn):
+                    os.remove(dfn)
+                os.rename(sfn, dfn)
+                
+        # Re-initialize clean working target log parameters
+        dfn = os.path.join(DATA_DIR, "messages1.log")
+        if os.path.exists(self.baseFilename):
+            if os.path.exists(dfn):
+                os.remove(dfn)
+            os.rename(self.baseFilename, dfn)
+            
+        if not self.delay:
+            self.stream = self._open()
+
+# Instantiate the custom logging sub-routines
+file_handler = SequentialLogNamer(LOG_FILE_BASE_PATH, maxBytes=MAX_LOG_SIZE_BYTES, backupCount=MAX_LOG_BACKUPS)
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+
+internal_logger = logging.getLogger("MatrixEngineLogger")
+internal_logger.setLevel(logging.INFO)
+internal_logger.addHandler(file_handler)
+
+# Overwrite native standard output vectors to trap standard prints
+sys.stdout = MasterStreamLogger(sys.stdout, internal_logger)
+
 # Universal Token Mint Repository Map
 TOKEN_MINTS = {
     "SOL": "So11111111111111111111111111111111111111112",
@@ -48,7 +117,7 @@ BUCKET_OVERFLOW_THRESHOLD = 1.20
 BASE_USDC_PER_BUCKET = 1000.0 / NUMBER_OF_LADDER
 
 # Set to True to overwrite live oracle feeds with an automated simulation price pump
-RUN_SIMULATION_PRICE_SHIFTER = True
+RUN_SIMULATION_PRICE_SHIFTER = False
 
 # The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
 GIT_VAULT_COOLDOWN_SECONDS = 300
@@ -461,8 +530,13 @@ async def main():
             print(f"[CALIBRATION] Current SOL/USD Market Price: ${current_sol_price:,.4f} , and loop counter: {loop_counter}")
             print(f"[CALIBRATION] Active Step Matrix Working Anchor: ${current_sol_price:,.4f} | Loop Counter: {loop_counter}")
             
-            # Pass the clean price to your wave generator
-            live_price = get_simulated_price(live_price, loop_counter)
+           # THE CORRECT DUAL-MODE CONDITION LOCK:
+            # Safely preserves your simulation shifter code block without destroying it.
+            if RUN_SIMULATION_PRICE_SHIFTER:
+                live_price = get_simulated_price(live_price, loop_counter)
+            else:
+                # Live production mode tracking parameters
+                pass
             
             # The rest of your existing step mapping logic remains completely untouched:
             if live_price:
