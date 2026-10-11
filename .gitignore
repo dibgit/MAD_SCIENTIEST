@@ -3,4 +3,5 @@ __pycache__/
 *.log
 !data/message*.log
 *.back
+*.bak
 *.log.*
