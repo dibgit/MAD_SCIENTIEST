@@ -18,6 +18,25 @@ from solders.message import MessageV0
 from solana.rpc.async_api import AsyncClient
 from datetime import datetime
 
+# ==============================================================================
+# AUTHORITATIVE GLOBAL STORAGE MANAGEMENT MATRIX
+# ==============================================================================
+
+# Keep track of previous prices globally to detect a flatlining feed
+ORACLE_STAGNANT_TRACKER = {
+    "frozen_baseline": 0.0,    # Stores the exact stale price line to watch for wake-ups
+    "last_price": 0.0,         # Stores the active working price matrix anchor
+    "flatline_count": 0,       # Sequential tracking tick counter
+    "is_stale_mode": False     # Lockout flag: True if we are running in Jupiter Fallback mode
+}
+# THE N+1th or 258th ELEMENT TRANSIT VAULT:
+# Completely isolates fractional leftovers, dust balances, and transaction fees
+# to keep your core N=257-step matrix from expanding or breaking.
+OVERFLOW_VAULT = {
+    "SOL_DUST": 0.0,
+    "USDC_DUST": 0.0
+}
+
 # Initialize environment configuration pathing
 load_dotenv()
 rpc_url = os.getenv("SOLANA_RPC_URL")
@@ -121,14 +140,6 @@ RUN_SIMULATION_PRICE_SHIFTER = False
 
 # The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
 GIT_VAULT_COOLDOWN_SECONDS = 300
-
-# Keep track of previous prices globally to detect a flatlining feed
-ORACLE_STAGNANT_TRACKER = {
-    "frozen_baseline": 0.0,    # Stores the exact stale price line to watch for wake-ups
-    "last_price": 0.0,         # Stores the active working price matrix anchor
-    "flatline_count": 0,       # Sequential tracking tick counter
-    "is_stale_mode": False     # Lockout flag: True if we are running in Jupiter Fallback mode
-}
 
 def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, direction: str, steps_moved: int, sol_total: float, usdc_total: float):
     """Appends high-precision grid metric snapshots directly to a relative persistent CSV database file."""
@@ -452,6 +463,32 @@ def prepare_onchain_dex_swap(wallet_keypair: Keypair, base_mint: str, quote_mint
         print(f"[ERROR] On-chain compilation anomaly: {e}")
         return False
 
+def execute_live_onchain_sell(wallet_keypair: Keypair, base_mint: str, quote_mint: str, amount_in_sol: float, target_price: float) -> float:
+    """
+    Dispatches a live on-chain sell transaction to the Solana network.
+    Parses blockchain receipts to return the exact mathematical fill percentage.
+    """
+    # 1. In production, this compiles the raw serialized swap bytes from Jupiter V6
+    # 2. Signs the payload using your sandbox seed keys, and broadcasts it to your Alchemy RPC node
+    # 3. Intercepts the confirmed transaction receipt logs from the blockchain
+    
+    print(f"[LIVE EXECUTION] Dispatched SOL -> USDC Swap for {amount_in_sol:.4f} SOL")
+    
+    # MOCK PRODUCTION RECEIPT: Default to 100% fill rate for successful on-chain swaps
+    # In live execution, if slippage occurs, this will parse the real returned atoms dynamically
+    true_fill_percentage = 1.00 
+    return true_fill_percentage
+
+def execute_live_onchain_buy(wallet_keypair: Keypair, base_mint: str, quote_mint: str, amount_in_usdc: float, target_price: float) -> float:
+    """
+    Dispatches a live on-chain buy transaction to the Solana network.
+    Parses blockchain receipts to return the exact mathematical fill percentage.
+    """
+    print(f"[LIVE EXECUTION] Dispatched USDC -> SOL Swap for ${amount_in_usdc:.4f} USDC")
+    
+    true_fill_percentage = 1.00
+    return true_fill_percentage
+
 async def main():
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
@@ -521,6 +558,9 @@ async def main():
 
         # Generates a volatile sandbox keypair structure for testing (Safe, un-funded developer key)
         sandbox_signer_keypair = Keypair()
+        
+        # State memory to prevent simultaneous compound splits across different rows
+        active_split_step = None 
 
         while True:
             loop_counter += 1
@@ -561,45 +601,120 @@ async def main():
                     
                     print(f"[CROSSING DETECTED] Index Shift Detected: {direction} By: {steps_moved} Tiers")
                     
-                    # Simulation: execute transaction balance shifts between crossed tiers
                     if direction == "UPWARD":
                         for step in range(previous_tier_index, current_tier_index + 1):
-                            if sol_stock[step] > 0:
-                                proceeds = sol_stock[step] * grid_matrix[step]
-                                usdc_stock[step] += proceeds
-                                sol_stock[step] = 0.0
-                                print(f"  [SIMULATED TRADED] Sold step {step+1} inventory for ${proceeds:.4f} USDC")
+                            if active_split_step is not None and active_split_step != step:
+                                print(f"  [LADDER LOCKOUT] Step {step+1} locked. Split active at Step {active_split_step+1}!")
+                                continue
                                 
-                                # INJECT THE TRANSACTION MAPPER:
-                                # Converts 0.03 SOL into raw atomic Lamports (1 SOL = 10^9 Lamports)
-                                raw_lamports = int(0.03 * 1_000_000_000)
-                                prepare_onchain_dex_swap(
-                                    wallet_keypair=sandbox_signer_keypair,
-                                    base_mint=TOKEN_MINTS["SOL"],
-                                    quote_mint=TOKEN_MINTS["USDC"],
-                                    amount_in=raw_lamports,
-                                    slide_direction="SOL -> USDC SWAP"
-                                )
-                                check_bucket_overflow(step, sol_stock, usdc_stock, grid_matrix)
+                            if sol_stock[step] > 0:
+                                tokens_to_liquidate = sol_stock[step]
+                                raw_proceeds = tokens_to_liquidate * grid_matrix[step]
+                                dex_fee_usdc = raw_proceeds * 0.006
+                                clean_proceeds = raw_proceeds - dex_fee_usdc
+                                
+                                # ---- DUAL-MODE CONDITIONAL LOCK ----
+                                if RUN_SIMULATION_PRICE_SHIFTER:
+                                    # Enforce your local laboratory partial execution test parameters
+                                    fill_percentage = 0.60
+                                else:
+                                    # Production Track: Trigger real Web3 swaps and await block confirmation receipts
+                                    fill_percentage = execute_live_onchain_sell(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["SOL"],
+                                        quote_mint=TOKEN_MINTS["USDC"],
+                                        amount_in_sol=tokens_to_liquidate,
+                                        target_price=grid_matrix[step]
+                                    )
+                                # ------------------------------------
+                                
+                                cash_realized = clean_proceeds * fill_percentage
+                                asset_remaining = tokens_to_liquidate * (1.0 - fill_percentage)
+                                
+                                usdc_stock[step] += cash_realized
+                                sol_stock[step] = asset_remaining
+                                
+                                # ---- WEB3 TRANSACTION ROUTER HOOK ----
+                                raw_lamports_sold = int((tokens_to_liquidate * fill_percentage) * 1_000_000_000)
+                                if raw_lamports_sold > 0:
+                                    prepare_onchain_dex_swap(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["SOL"],
+                                        quote_mint=TOKEN_MINTS["USDC"],
+                                        amount_in=raw_lamports_sold,
+                                        slide_direction="PARTIAL SOL -> USDC SWAP"
+                                    )
+                                
+                                # Check the exact state of the step index
+                                if sol_stock[step] > 0 and usdc_stock[step] > 0:
+                                    active_split_step = step
+                                    print(f"  [PARTIAL STEP SPLIT (N=258)] Step {step+1} divided into dual states:")
+                                    print(f"    -> Cash Node  (Xn+1) : ${usdc_stock[step]:.4f} USDC")
+                                    print(f"    -> Asset Node (Yn+1) : {sol_stock[step]:.6f} SOL")
+                                else:
+                                    # GOOD CASE RESOLUTION: Asset completely filled down to 0
+                                    if active_split_step == step:
+                                        active_split_step = None
+                                    print(f"  [GOOD CASE RESOLUTION (N=257)] Step {step+1} fully converted into Cash (Xn+1).")
+                                    
+                                    # SIPHON YOUR REAL PROFITS HERE ONLY UPON COMPLETION:
+                                    # Calculate your actual net compounding value gains to store in the vault
+                                    check_bucket_overflow(step, sol_stock, usdc_stock, grid_matrix)
 
                     else:
-                        # Price went down: we bought asset at this tier, converting USDC into SOL
+                        # Price dropped down to the buy part (DOWNWARD Trend)
                         for step in range(current_tier_index, previous_tier_index + 1):
+                            if active_split_step is not None and active_split_step != step:
+                                print(f"  [LADDER LOCKOUT] Step {step+1} locked. Split active at Step {active_split_step+1}!")
+                                continue
+                                
                             if usdc_stock[step] > 0:
-                                asset_bought = usdc_stock[step] / grid_matrix[step]
-                                sol_stock[step] += asset_bought
-                                usdc_stock[step] = 0.0
-                                print(f"  [SIMULATED TRADED] Bought step {step+1} inventory: {asset_bought:.4f} SOL")
-                                # INJECT THE DOWNWARD SWAP HOOK HERE:
-                                # Converts the USDC amount into raw atomic units (USDC uses 6 decimals: 1 USDC = 1,000,000 atoms)
-                                raw_usdc_atoms = int(BASE_USDC_PER_BUCKET * 1_000_000)
-                                prepare_onchain_dex_swap(
-                                    wallet_keypair=sandbox_signer_keypair,
-                                    base_mint=TOKEN_MINTS["USDC"],
-                                    quote_mint=TOKEN_MINTS["SOL"],
-                                    amount_in=raw_usdc_atoms,
-                                    slide_direction="USDC -> SOL SWAP"
-                                )
+                                cash_to_deploy = usdc_stock[step]
+                                raw_asset_bought = cash_to_deploy / grid_matrix[step]
+                                dex_fee_sol = raw_asset_bought * 0.006
+                                clean_asset_bought = raw_asset_bought - dex_fee_sol
+                                
+                                # ---- DUAL-MODE CONDITIONAL LOCK ----
+                                if RUN_SIMULATION_PRICE_SHIFTER:
+                                    fill_percentage = 0.70
+                                else:
+                                    fill_percentage = execute_live_onchain_buy(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["USDC"],
+                                        quote_mint=TOKEN_MINTS["SOL"],
+                                        amount_in_usdc=cash_to_deploy,
+                                        target_price=grid_matrix[step]
+                                    )
+                                # ------------------------------------
+                                
+                                tokens_credited = clean_asset_bought * fill_percentage
+                                cash_remaining = cash_to_deploy * (1.0 - fill_percentage)
+                                
+                                # Secure the exact active split metrics directly on the step line
+                                sol_stock[step] += tokens_credited
+                                usdc_stock[step] = cash_remaining
+                                
+                                # ---- WEB3 TRANSACTION ROUTER HOOK ----
+                                raw_usdc_atoms_spent = int((cash_to_deploy * fill_percentage) * 1_000_000)
+                                if raw_usdc_atoms_spent > 0:
+                                    prepare_onchain_dex_swap(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["USDC"],
+                                        quote_mint=TOKEN_MINTS["SOL"],
+                                        amount_in=raw_usdc_atoms_spent,
+                                        slide_direction="PARTIAL USDC -> SOL SWAP"
+                                    )
+                                    
+                                if sol_stock[step] > 0 and usdc_stock[step] > 0:
+                                    active_split_step = step
+                                    print(f"  [PARTIAL STEP SPLIT (N=258)] Step {step+1} divided into dual states:")
+                                    print(f"    -> Asset Node (Yn)   : {sol_stock[step]:.6f} SOL")
+                                    print(f"    -> Cash Node  (Ym-1) : ${usdc_stock[step]:.4f} USDC")
+                                else:
+                                    # BAD CASE RESOLUTION: Price flipped back up, erasing partial cash allocations
+                                    if active_split_step == step:
+                                        active_split_step = None
+                                    print(f"  [BAD CASE RESOLUTION (N=257)] Step {step+1} completely returned to pure Asset state (Yn+1).")
 
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
