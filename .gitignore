@@ -1,8 +1,6 @@
 .env
 __pycache__/
-# Ignore all .back files globally or in data/
+*.log
+!data/message*.log
 *.back
-!data/
-
-# Ignore log files, but allow message*.log inside data/
-data/message*.log
+*.log.*
