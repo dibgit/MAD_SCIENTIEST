@@ -55,8 +55,10 @@ GIT_VAULT_COOLDOWN_SECONDS = 300
 
 # Keep track of previous prices globally to detect a flatlining feed
 ORACLE_STAGNANT_TRACKER = {
-    "last_price": 0.0,
-    "flatline_count": 0
+    "frozen_baseline": 0.0,    # Stores the exact stale price line to watch for wake-ups
+    "last_price": 0.0,         # Stores the active working price matrix anchor
+    "flatline_count": 0,       # Sequential tracking tick counter
+    "is_stale_mode": False     # Lockout flag: True if we are running in Jupiter Fallback mode
 }
 
 def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, direction: str, steps_moved: int, sol_total: float, usdc_total: float):
@@ -135,22 +137,43 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
         # Parse the raw on-chain state value
         oracle_price = float(raw_price) / 100_000_000.0
         
-        # ---- STATE MACHINE EVALUATION CONTROLS ----
-        if oracle_price == ORACLE_STAGNANT_TRACKER["last_price"]:
-            # Rule 1: Oracle is flatlining against itself. Increase the counter.
-            ORACLE_STAGNANT_TRACKER["flatline_count"] += 1
-        else:
-            # Rule 2: Oracle data is not flat. Consider oracle correct, reset counters.
+        # Initialize the baseline price tracking variable on your very first boot tick
+        if ORACLE_STAGNANT_TRACKER["frozen_baseline"] == 0.0:
+            ORACLE_STAGNANT_TRACKER["frozen_baseline"] = oracle_price
             ORACLE_STAGNANT_TRACKER["last_price"] = oracle_price
             ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
             
-        # Trigger Jupiter check ONLY when the counter hits or passes the threshold boundary
+        # ---- ORACLE INTERROGATION ENGINE ----
+        if ORACLE_STAGNANT_TRACKER["is_stale_mode"]:
+            # CRITICAL CHECK: Has the oracle finally woken up and broken past its frozen baseline?
+            if oracle_price != ORACLE_STAGNANT_TRACKER["frozen_baseline"]:
+                print(f"[ORACLE AWOKEN] On-chain data block changed! Re-engaging native oracle pipeline.")
+                ORACLE_STAGNANT_TRACKER["is_stale_mode"] = False
+                ORACLE_STAGNANT_TRACKER["frozen_baseline"] = oracle_price
+                ORACLE_STAGNANT_TRACKER["last_price"] = oracle_price
+                ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
+            else:
+                # The oracle is still frozen at its old value. Maintain lockout mode.
+                ORACLE_STAGNANT_TRACKER["flatline_count"] += 1
+        else:
+            # Standard monitoring mode: check if oracle is flatlining against itself
+            if oracle_price == ORACLE_STAGNANT_TRACKER["last_price"]:
+                ORACLE_STAGNANT_TRACKER["flatline_count"] += 1
+            else:
+                ORACLE_STAGNANT_TRACKER["last_price"] = oracle_price
+                ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
+
+        # ---- LOW-FREQUENCY JUPITER ROTATION ENGINE ----
+        # Trigger Jupiter if standard flatline hits 5, OR every 5 ticks while inside stale mode
         if ORACLE_STAGNANT_TRACKER["flatline_count"] >= 5:
             print(f"[WARNING] HYBRID FALLBACK triggered. Evaluation count: {ORACLE_STAGNANT_TRACKER['flatline_count']}")
             
             if not jupiter_api_key:
-                print("[WARNING] Fallback aborted: JUPITER_API_KEY is missing from .env configuration.")
+                print("[WARNING] Flatline threshold breached, but JUPITER_API_KEY is missing from .env.")
             else:
+                # Activate Lockout Flag immediately to protect downstream loops
+                ORACLE_STAGNANT_TRACKER["is_stale_mode"] = True
+                
                 sol_mint = TOKEN_MINTS["SOL"]
                 url = "https://api.jup.ag/price/v3"
                 params = {'ids': sol_mint}
@@ -162,10 +185,9 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
                         prices = response.json()
                         spot_price = float(prices[sol_mint]['usdPrice'])
                         
-                        print(f"[HYBRID FEED] Success. Extrapolating via Jupiter V3: ${spot_price:.4f}")
+                        print(f"[JUPITER TICK] {pair_ticker} Active Working Value: ${spot_price:.4f}")
                         
-                        # CRITICAL MEMORY ALIGNMENT:
-                        # Lock Jupiter's fresh price into our global state tracker.
+                        # Cache the fresh Jupiter price and reset the threshold interval
                         ORACLE_STAGNANT_TRACKER["last_price"] = spot_price
                         # Reset flatline back to 0 so we don't spam the API on the next tick.
                         ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
@@ -176,8 +198,7 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
                 except Exception as ex_jup:
                     print(f"[WARNING] Jupiter V3 API fallback interface error: {ex_jup}")
                     
-        # If the oracle data is fresh (count < 5), or if Jupiter calls fail, use the tracking data cache.
-        # This enforces your rule: if oracle stays flat, it continues using the last correct price baseline.
+        # Return the last known verified price out of our secure cache
         active_working_price = ORACLE_STAGNANT_TRACKER["last_price"]
         print(f"[ORACLE TICK] {pair_ticker} Active Working Value: ${active_working_price:,.4f}")
         return active_working_price
@@ -365,30 +386,53 @@ async def main():
         print("[CONNECTION] Remote Procedure Call (RPC) Node Status: ONLINE")
         await check_wallet_fuel(client)
         
-        # Run baseline calibration parameters
-        current_sol_price = await fetch_onchain_price(client, "SOL/USD")
-        if not current_sol_price or current_sol_price <= 0:
+        # ==============================================================================
+        # ?? THE BOOT CALIBRATION FIX: FORCE REAL SPOT PRICE TO BUILD THE LADDER
+        # ==============================================================================
+        print("[CALIBRATION] Initializing authoritative real-world boot calibration...")
+        if not jupiter_api_key:
+            print("[CRITICAL] Configuration Error: JUPITER_API_KEY missing from your .env file. Cannot verify boot baseline.")
+            return
+            
+        sol_mint = TOKEN_MINTS["SOL"]
+        url = "https://api.jup.ag/price/v3"
+        params = {'ids': sol_mint}
+        headers = {'x-api-key': jupiter_api_key.strip()}
+        
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=5)
+            if response.status_code == 200:
+                prices = response.json()
+                calibrated_boot_price = float(prices[sol_mint]['usdPrice'])
+                print(f"[CALIBRATION SUCCESS] Real-world asset spot entry confirmed: ${calibrated_boot_price:.4f}")
+                
+                # Anchor all global tracking caches onto the true price immediately
+                ORACLE_STAGNANT_TRACKER["last_price"] = calibrated_boot_price
+                ORACLE_STAGNANT_TRACKER["frozen_baseline"] = calibrated_boot_price
+                # Lock into stale mode from boot to immediately handle the frozen oracle feed
+                ORACLE_STAGNANT_TRACKER["is_stale_mode"] = True
+            else:
+                print(f"[WARNING] Jupiter boot calibration rejected (Status {response.status_code}). Defaulting to raw node maps.")
+                calibrated_boot_price = await fetch_onchain_price(client, "SOL/USD")
+        except Exception as e:
+            print(f"[WARNING] Calibration network connection timeout: {e}. Defaulting to raw node maps.")
+            calibrated_boot_price = await fetch_onchain_price(client, "SOL/USD")
+            
+        if not calibrated_boot_price or calibrated_boot_price <= 0:
             print("[CRITICAL] System calibration failed to establish asset market values.")
             return
         else:
-            print(f"[CALIBRATION] Current SOL/USD Market Price: ${current_sol_price:,.4f}")
+            print(f"[CALIBRATION] Current SOL/USD Market Price: ${calibrated_boot_price:,.4f}")
             
-        # Structure boundaries (50% crash margin / 50% pump margin)
-        mock_floor = current_sol_price * 0.50
-        mock_ceiling = current_sol_price * 1.50
+        # Initialize your custom multipliers around the TRUE calibrated price
+        mock_floor = calibrated_boot_price * 0.50
+        mock_ceiling = calibrated_boot_price * 1.50
         
-        # Generate grid structure
+        # Generate dynamic ladder array using verified metrics
         grid_matrix = generate_N_ladder(mock_floor, mock_ceiling, mode="geometric")
+        sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, calibrated_boot_price, total_budget_usdc=1000.0)
+        # ==============================================================================
         
-        # Initialize simulated capital matrix
-        sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, current_sol_price, total_budget_usdc=1000.0)
-        
-        print("[LOOP START] Monitoring Price Crossings Across Matrix Ranges")
-        
-        previous_tier_index = None
-        loop_counter = 0
-        
-        # Initialize tracking memory states
         previous_tier_index = None
         loop_counter = 0
         
@@ -402,11 +446,23 @@ async def main():
 
         while True:
             loop_counter += 1
-            live_price = await fetch_onchain_price(client, "SOL/USD")
             
-            # INJECT THE SIMULATION OVERRIDE HERE:
-            if live_price:
-                live_price = get_simulated_price(live_price, loop_counter)
+            # Fetch price out of our smart state machine
+            live_price = await fetch_onchain_price(client, "SOL/USD")
+            print(f"[CALIBRATION] Current SOL/USD Market Price: ${live_price:,.4f} , and loop counter: {loop_counter}")
+            
+            if not live_price:
+                await asyncio.sleep(3)
+                continue
+                
+            # THE HARD RESYNC ANCHOR: Lock our core matrix variables directly 
+            # to whatever verified price came out of our state machine memory cache.
+            current_sol_price = ORACLE_STAGNANT_TRACKER["last_price"]
+            print(f"[CALIBRATION] Current SOL/USD Market Price: ${current_sol_price:,.4f} , and loop counter: {loop_counter}")
+            print(f"[CALIBRATION] Active Step Matrix Working Anchor: ${current_sol_price:,.4f} | Loop Counter: {loop_counter}")
+            
+            # Pass the clean price to your wave generator
+            live_price = get_simulated_price(live_price, loop_counter)
             
             # The rest of your existing step mapping logic remains completely untouched:
             if live_price:
