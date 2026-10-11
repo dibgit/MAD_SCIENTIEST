@@ -108,7 +108,10 @@ async def check_wallet_fuel(client: AsyncClient):
 
 
 async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD"):
-    """Reads fixed-point raw integer byte data straight from smart contract storage channels."""
+    """
+    Reads fixed-point raw integer byte data from smart contracts with an intelligent, 
+    low-frequency Jupiter fallback state-machine.
+    """
     feed_address = ORACLE_FEEDS.get(pair_ticker)
     if not feed_address:
         print(f"[ABORT] Oracle mapping configuration target missing for: {pair_ticker}")
@@ -132,17 +135,21 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
         # Parse the raw on-chain state value
         oracle_price = float(raw_price) / 100_000_000.0
         
-        # ---- HYBRID FALLBACK CHECK ----
+        # ---- STATE MACHINE EVALUATION CONTROLS ----
         if oracle_price == ORACLE_STAGNANT_TRACKER["last_price"]:
+            # Rule 1: Oracle is flatlining against itself. Increase the counter.
             ORACLE_STAGNANT_TRACKER["flatline_count"] += 1
         else:
+            # Rule 2: Oracle data is not flat. Consider oracle correct, reset counters.
             ORACLE_STAGNANT_TRACKER["last_price"] = oracle_price
             ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
             
-        # If the oracle data block stays identical for 5 consecutive ticks, execute the verified Jupiter V3 API check
+        # Trigger Jupiter check ONLY when the counter hits or passes the threshold boundary
         if ORACLE_STAGNANT_TRACKER["flatline_count"] >= 5:
+            print(f"[WARNING] HYBRID FALLBACK triggered. Evaluation count: {ORACLE_STAGNANT_TRACKER['flatline_count']}")
+            
             if not jupiter_api_key:
-                print("[WARNING] Oracle flatlining, but JUPITER_API_KEY is missing from your .env file.")
+                print("[WARNING] Fallback aborted: JUPITER_API_KEY is missing from .env configuration.")
             else:
                 sol_mint = TOKEN_MINTS["SOL"]
                 url = "https://api.jup.ag/price/v3"
@@ -154,13 +161,26 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
                     if response.status_code == 200:
                         prices = response.json()
                         spot_price = float(prices[sol_mint]['usdPrice'])
-                        print(f"[HYBRID FEED] Oracle stale ({ORACLE_STAGNANT_TRACKER['flatline_count']} ticks). Extrapolating via Jupiter V3: ${spot_price:.4f}")
+                        
+                        print(f"[HYBRID FEED] Success. Extrapolating via Jupiter V3: ${spot_price:.4f}")
+                        
+                        # CRITICAL MEMORY ALIGNMENT:
+                        # Lock Jupiter's fresh price into our global state tracker.
+                        ORACLE_STAGNANT_TRACKER["last_price"] = spot_price
+                        # Reset flatline back to 0 so we don't spam the API on the next tick.
+                        ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
+                        
+                        # TERMINATE OPERATION HERE: Directly return the correct spot price to your grid engine.
+                        print(f"[JUPITER TICK] {pair_ticker} Active Working Value: ${spot_price:,.4f}")
                         return spot_price
                 except Exception as ex_jup:
                     print(f"[WARNING] Jupiter V3 API fallback interface error: {ex_jup}")
                     
-        print(f"[ORACLE TICK] {pair_ticker} Feed Value: ${oracle_price:,.4f}")
-        return oracle_price
+        # If the oracle data is fresh (count < 5), or if Jupiter calls fail, use the tracking data cache.
+        # This enforces your rule: if oracle stays flat, it continues using the last correct price baseline.
+        active_working_price = ORACLE_STAGNANT_TRACKER["last_price"]
+        print(f"[ORACLE TICK] {pair_ticker} Active Working Value: ${active_working_price:,.4f}")
+        return active_working_price
         
     except Exception as e:
         print(f"[ERROR] On-chain cryptograph execution failure: {e}")
@@ -350,6 +370,8 @@ async def main():
         if not current_sol_price or current_sol_price <= 0:
             print("[CRITICAL] System calibration failed to establish asset market values.")
             return
+        else:
+            print(f"[CALIBRATION] Current SOL/USD Market Price: ${current_sol_price:,.4f}")
             
         # Structure boundaries (50% crash margin / 50% pump margin)
         mock_floor = current_sol_price * 0.50
