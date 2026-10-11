@@ -278,7 +278,6 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
 
 def generate_N_ladder(low_price: float, high_price: float, mode: str = "geometric"):
     """Generates an explicit, high-precision mathematical variable N-tier matrix array layout."""
-    # Calculates midpoint index mathematically to handle even/odd N integers cleanly
     mid_index = int(NUMBER_OF_LADDER / 2)
     
     if mode == "arithmetic":
@@ -294,7 +293,17 @@ def generate_N_ladder(low_price: float, high_price: float, mode: str = "geometri
     if mode == "geometric" and NUMBER_OF_LADDER > 1:
         pct_ratio = (grid_array[1] - grid_array[0]) / grid_array[0] * 100
         print(f"  Compounding Delta Step Size: {pct_ratio:.4f}% percentage variance")
+        
+        # MINIMALIST POSITIVE ZONE SNAPSHOT:
+        # Enforces a quick visual validation of your round-trip inventory compounding capacity
+        net_estimated_return = pct_ratio - 0.60
+        if net_estimated_return > 0:
+            print(f"  [MATH CHECK] Net Round-Trip Token Delta: +{net_estimated_return:.4f}% (POSITIVE COMPOUNDING ZONE)")
+        else:
+            print(f"  [MATH CHECK] Net Round-Trip Token Delta: {net_estimated_return:.4f}% (NEGATIVE ZONE: Increase range or decrease steps)")
+            
     return grid_array
+
 
 def initialize_inventory_matrix(grid_matrix, current_price, total_budget_usdc=1000.0):
     """Allocates your budget across all configured steps based on current market price."""

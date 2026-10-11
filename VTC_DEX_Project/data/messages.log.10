@@ -1,0 +1,108 @@
+2026-10-11 23:03:08 - [TICK CHECK #434] Steady inside Step 164/257. (Market Price: $112.2745)
+2026-10-11 23:03:11 - [ORACLE TICK] SOL/USD Active Working Value: $112.2745
+2026-10-11 23:03:11 - [CALIBRATION] Current SOL/USD Market Price: $112.2745 , and loop counter: 435
+2026-10-11 23:03:11 - [CALIBRATION] Current SOL/USD Market Price: $112.2745 , and loop counter: 435
+2026-10-11 23:03:11 - [CALIBRATION] Active Step Matrix Working Anchor: $112.2745 | Loop Counter: 435
+2026-10-11 23:03:11 - [TICK CHECK #435] Steady inside Step 164/257. (Market Price: $112.2745)
+2026-10-11 23:03:14 - [WARNING] HYBRID FALLBACK triggered. Evaluation count: 5
+2026-10-11 23:03:14 - [JUPITER TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:14 - [JUPITER TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:14 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 436
+2026-10-11 23:03:14 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 436
+2026-10-11 23:03:14 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3218 | Loop Counter: 436
+2026-10-11 23:03:14 - [TICK CHECK #436] Steady inside Step 164/257. (Market Price: $112.3218)
+2026-10-11 23:03:17 - [ORACLE TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:17 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 437
+2026-10-11 23:03:17 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 437
+2026-10-11 23:03:17 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3218 | Loop Counter: 437
+2026-10-11 23:03:17 - [TICK CHECK #437] Steady inside Step 164/257. (Market Price: $112.3218)
+2026-10-11 23:03:20 - [ORACLE TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:20 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 438
+2026-10-11 23:03:20 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 438
+2026-10-11 23:03:20 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3218 | Loop Counter: 438
+2026-10-11 23:03:20 - [TICK CHECK #438] Steady inside Step 164/257. (Market Price: $112.3218)
+2026-10-11 23:03:24 - [ORACLE TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:24 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 439
+2026-10-11 23:03:24 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 439
+2026-10-11 23:03:24 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3218 | Loop Counter: 439
+2026-10-11 23:03:24 - [TICK CHECK #439] Steady inside Step 164/257. (Market Price: $112.3218)
+2026-10-11 23:03:27 - [ORACLE TICK] SOL/USD Active Working Value: $112.3218
+2026-10-11 23:03:27 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 440
+2026-10-11 23:03:27 - [CALIBRATION] Current SOL/USD Market Price: $112.3218 , and loop counter: 440
+2026-10-11 23:03:27 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3218 | Loop Counter: 440
+2026-10-11 23:03:27 - [TICK CHECK #440] Steady inside Step 164/257. (Market Price: $112.3218)
+2026-10-11 23:03:30 - [WARNING] HYBRID FALLBACK triggered. Evaluation count: 5
+2026-10-11 23:03:30 - [JUPITER TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:30 - [JUPITER TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:30 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 441
+2026-10-11 23:03:30 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 441
+2026-10-11 23:03:30 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3508 | Loop Counter: 441
+2026-10-11 23:03:30 - [TICK CHECK #441] Steady inside Step 164/257. (Market Price: $112.3508)
+2026-10-11 23:03:33 - [ORACLE TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:33 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 442
+2026-10-11 23:03:33 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 442
+2026-10-11 23:03:33 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3508 | Loop Counter: 442
+2026-10-11 23:03:33 - [TICK CHECK #442] Steady inside Step 164/257. (Market Price: $112.3508)
+2026-10-11 23:03:36 - [ORACLE TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:36 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 443
+2026-10-11 23:03:36 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 443
+2026-10-11 23:03:36 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3508 | Loop Counter: 443
+2026-10-11 23:03:36 - [TICK CHECK #443] Steady inside Step 164/257. (Market Price: $112.3508)
+2026-10-11 23:03:39 - [ORACLE TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:39 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 444
+2026-10-11 23:03:39 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 444
+2026-10-11 23:03:39 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3508 | Loop Counter: 444
+2026-10-11 23:03:39 - [TICK CHECK #444] Steady inside Step 164/257. (Market Price: $112.3508)
+2026-10-11 23:03:42 - [ORACLE TICK] SOL/USD Active Working Value: $112.3508
+2026-10-11 23:03:42 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 445
+2026-10-11 23:03:42 - [CALIBRATION] Current SOL/USD Market Price: $112.3508 , and loop counter: 445
+2026-10-11 23:03:42 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3508 | Loop Counter: 445
+2026-10-11 23:03:42 - [TICK CHECK #445] Steady inside Step 164/257. (Market Price: $112.3508)
+2026-10-11 23:03:45 - [WARNING] HYBRID FALLBACK triggered. Evaluation count: 5
+2026-10-11 23:03:46 - [JUPITER TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:46 - [JUPITER TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:46 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 446
+2026-10-11 23:03:46 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 446
+2026-10-11 23:03:46 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3644 | Loop Counter: 446
+2026-10-11 23:03:46 - [TICK CHECK #446] Steady inside Step 164/257. (Market Price: $112.3644)
+2026-10-11 23:03:49 - [ORACLE TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:49 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 447
+2026-10-11 23:03:49 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 447
+2026-10-11 23:03:49 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3644 | Loop Counter: 447
+2026-10-11 23:03:49 - [TICK CHECK #447] Steady inside Step 164/257. (Market Price: $112.3644)
+2026-10-11 23:03:52 - [ORACLE TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:52 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 448
+2026-10-11 23:03:52 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 448
+2026-10-11 23:03:52 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3644 | Loop Counter: 448
+2026-10-11 23:03:52 - [TICK CHECK #448] Steady inside Step 164/257. (Market Price: $112.3644)
+2026-10-11 23:03:55 - [ORACLE TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:55 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 449
+2026-10-11 23:03:55 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 449
+2026-10-11 23:03:55 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3644 | Loop Counter: 449
+2026-10-11 23:03:55 - [TICK CHECK #449] Steady inside Step 164/257. (Market Price: $112.3644)
+2026-10-11 23:03:58 - [ORACLE TICK] SOL/USD Active Working Value: $112.3644
+2026-10-11 23:03:58 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 450
+2026-10-11 23:03:58 - [CALIBRATION] Current SOL/USD Market Price: $112.3644 , and loop counter: 450
+2026-10-11 23:03:58 - [CALIBRATION] Active Step Matrix Working Anchor: $112.3644 | Loop Counter: 450
+2026-10-11 23:03:58 - [TICK CHECK #450] Steady inside Step 164/257. (Market Price: $112.3644)
+2026-10-11 23:04:01 - [WARNING] HYBRID FALLBACK triggered. Evaluation count: 5
+2026-10-11 23:04:01 - [JUPITER TICK] SOL/USD Active Working Value: $112.2960
+2026-10-11 23:04:01 - [JUPITER TICK] SOL/USD Active Working Value: $112.2960
+2026-10-11 23:04:01 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 451
+2026-10-11 23:04:01 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 451
+2026-10-11 23:04:01 - [CALIBRATION] Active Step Matrix Working Anchor: $112.2960 | Loop Counter: 451
+2026-10-11 23:04:01 - [TICK CHECK #451] Steady inside Step 164/257. (Market Price: $112.2960)
+2026-10-11 23:04:05 - [ORACLE TICK] SOL/USD Active Working Value: $112.2960
+2026-10-11 23:04:05 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 452
+2026-10-11 23:04:05 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 452
+2026-10-11 23:04:05 - [CALIBRATION] Active Step Matrix Working Anchor: $112.2960 | Loop Counter: 452
+2026-10-11 23:04:05 - [TICK CHECK #452] Steady inside Step 164/257. (Market Price: $112.2960)
+2026-10-11 23:04:08 - [ORACLE TICK] SOL/USD Active Working Value: $112.2960
+2026-10-11 23:04:08 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 453
+2026-10-11 23:04:08 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 453
+2026-10-11 23:04:08 - [CALIBRATION] Active Step Matrix Working Anchor: $112.2960 | Loop Counter: 453
+2026-10-11 23:04:08 - [TICK CHECK #453] Steady inside Step 164/257. (Market Price: $112.2960)
+2026-10-11 23:04:11 - [ORACLE TICK] SOL/USD Active Working Value: $112.2960
+2026-10-11 23:04:11 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 454
+2026-10-11 23:04:11 - [CALIBRATION] Current SOL/USD Market Price: $112.2960 , and loop counter: 454
+2026-10-11 23:04:11 - [CALIBRATION] Active Step Matrix Working Anchor: $112.2960 | Loop Counter: 454
