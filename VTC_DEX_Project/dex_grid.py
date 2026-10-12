@@ -489,6 +489,28 @@ def execute_live_onchain_buy(wallet_keypair: Keypair, base_mint: str, quote_mint
     true_fill_percentage = 1.00
     return true_fill_percentage
 
+def print_matrix_slice_lane(start_idx: int, end_idx: int, grid_matrix, sol_stock, usdc_stock):
+    """
+    Prints a targeted horizontal snapshot of your grid ladder allocations.
+    Enforces a clean, scannable text line tracking exact tier balances.
+    """
+    total_steps = len(grid_matrix)
+    # Safely constrain the index parameters to stay within your 257 array bounds
+    s_idx = max(0, min(start_idx, total_steps - 1))
+    e_idx = max(s_idx, min(end_idx, total_steps - 1))
+    
+    output_segments = []
+    for i in range(s_idx, e_idx + 1):
+        tier_price = grid_matrix[i]
+        sol_bal = sol_stock[i]
+        usdc_bal = usdc_stock[i]
+        
+        # Format each step dynamically: [Step_ID: Price | SOL_Qty / USDC_Qty]
+        segment = f"[{i+1:03d}:${tier_price:.2f}|{sol_bal:.4f}S/${usdc_bal:.2f}U]"
+        output_segments.append(segment)
+        
+    print(f"[MATRIX INSPECT] Steps {s_idx+1} to {e_idx+1}: " + " -> ".join(output_segments))
+
 async def main():
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
@@ -719,7 +741,15 @@ async def main():
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
                     # INJECT THE NEW LOGGER HERE: Pass all current system states directly to your CSV file
-              
+                    # Dynamically look at 3 steps below and 3 steps above your current position
+                    print_matrix_slice_lane(
+                        start_idx=current_tier_index - 3,
+                        end_idx=current_tier_index + 3,
+                        grid_matrix=grid_matrix,
+                        sol_stock=sol_stock,
+                        usdc_stock=usdc_stock
+                    )
+                    
                     log_transaction_to_csv(
                         loop_id=loop_counter,
                         live_price=live_price,
