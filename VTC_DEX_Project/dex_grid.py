@@ -9,6 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import subprocess
 import json
+import random
 import numpy as np
 from dotenv import load_dotenv
 from solders.pubkey import Pubkey
@@ -17,10 +18,14 @@ from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
 from solana.rpc.async_api import AsyncClient
 from datetime import datetime
+from dataclasses import dataclass
 
 # ==============================================================================
 # AUTHORITATIVE GLOBAL STORAGE MANAGEMENT MATRIX
 # ==============================================================================
+# REVERTED: Standardized gap to absorb 0.6% fees + ensure a clean +0.15% compounding return
+#MIN_ROUND_TRIP_GAP_PCT = 0.01362703
+MIN_ROUND_TRIP_GAP_PCT = 0.008
 
 # Keep track of previous prices globally to detect a flatlining feed
 ORACLE_STAGNANT_TRACKER = {
@@ -135,8 +140,28 @@ BUCKET_OVERFLOW_THRESHOLD = 1.20
 # DYNAMIC WORKING BALANCES: Base budget allocated per step is dynamically scaled to NUMBER_OF_LADDER
 BASE_USDC_PER_BUCKET = 1000.0 / NUMBER_OF_LADDER
 
-# Set to True to overwrite live oracle feeds with an automated simulation price pump
-RUN_SIMULATION_PRICE_SHIFTER = False
+# SET TO TRUE TO ACTIVATE THE RANDOM CONVEYOR ORDER EXHAUSTION ENGINE
+RUN_SIMULATION_PRICE_SHIFTER = True
+
+# Variable tracking to manage random simulated order-book flows
+SIMULATION_STATE = {
+    "current_sim_price": 0.0,
+    "consecutive_direction_count": 0,
+    "active_trend": "UPWARD"
+}
+
+# Standalone, synthetic wVTC/SOL conveyor simulation settings
+CONVEYOR_SIMULATION_EVENTS = int(os.getenv("CONVEYOR_SIMULATION_EVENTS", default=30))
+CONVEYOR_SIMULATION_SEED = int(os.getenv("CONVEYOR_SIMULATION_SEED", default=42))
+CONVEYOR_SIMULATION_RUNGS = int(os.getenv("CONVEYOR_SIMULATION_RUNGS", default=12))
+# Adjust simulation fee to 0.3% per side (0.6% total round-trip) to match live metrics
+CONVEYOR_SIMULATION_FEE_RATE = float(os.getenv("CONVEYOR_SIMULATION_FEE_RATE", default=0.003))
+CONVEYOR_SIMULATION_TARGET_NET_GROWTH = float(os.getenv("CONVEYOR_SIMULATION_TARGET_NET_GROWTH", default=0.0015))
+USDC_SOL_SIMULATION_BUY_FLOOR = float(os.getenv("USDC_SOL_SIMULATION_BUY_FLOOR", default=100.0))
+USDC_SOL_SIMULATION_BUY_CEILING = float(os.getenv("USDC_SOL_SIMULATION_BUY_CEILING", default=200.0))
+USDC_SOL_SIMULATION_INITIAL_USDC = float(os.getenv("USDC_SOL_SIMULATION_INITIAL_USDC", default=1500.0))
+USDC_SOL_SIMULATION_INITIAL_SOL = float(os.getenv("USDC_SOL_SIMULATION_INITIAL_SOL", default=15.0))
+USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL = float(os.getenv("USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL", default=3.0))
 
 # The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
 GIT_VAULT_COOLDOWN_SECONDS = 300
@@ -188,6 +213,54 @@ async def check_wallet_fuel(client: AsyncClient):
     except Exception as e:
         print(f"[ERROR] Failed to execute wallet balance check string: {e}")
 
+async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> float:
+    """
+    Programmatically queries the live Solana blockchain ledger via RPC.
+    Derives Associated Token Accounts (ATA) to parse exact real-time SPL token balances.
+    """
+    if not wallet_address_str:
+        print(f"[ERROR] Cannot fetch {token_ticker}: MY_PUBLIC_WALLET missing from .env.")
+        return 0.0
+        
+    token_mint_str = TOKEN_MINTS.get(token_ticker)
+    if not token_mint_str:
+        print(f"[ERROR] Ticker mapping configuration missing for target: {token_ticker}")
+        return 0.0
+
+    try:
+        # Clean and sanitize configuration strings out of your .env payload
+        clean_wallet = str(wallet_address_str).replace('"', '').replace("'", "").strip()
+        clean_mint = str(token_mint_str).replace('"', '').replace("'", "").strip()
+        
+        owner_pubkey = Pubkey.from_string(clean_wallet)
+        mint_pubkey = Pubkey.from_string(clean_mint)
+        
+        # Interrogate the live RPC node using the official SPL Token Program filters
+        opts = {"mint": mint_pubkey}
+        response = await client.get_token_accounts_by_owner(owner_pubkey, opts)
+        
+        if not response.value:
+            # If the account doesn't exist on-chain yet, it means the balance is exactly 0
+            print(f"[BALANCE CHECK] Live {token_ticker} Wallet State: 0.0000 (No Associated Account Found)")
+            return 0.0
+            
+        # Extract the account public key from the first matched array slot
+        account_data_block = response.value[0]
+        account_pubkey = account_data_block.pubkey
+        
+        # Query the exact token account details to extract high-precision integer balances
+        balance_response = await client.get_token_account_balance(account_pubkey)
+        
+        if balance_response.value:
+            # Extract the raw floating-point valuation parsed directly by the RPC parser node
+            live_balance = float(balance_response.value.ui_amount)
+            print(f"[BALANCE CHECK] Live {token_ticker} Balance Confirmed: {live_balance:,.4f} tokens")
+            return live_balance
+            
+        return 0.0
+    except Exception as e:
+        print(f"[ERROR] Failed to execute Web3 token balance ledger interrogation: {e}")
+        return 0.0
 
 async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD"):
     """
@@ -511,6 +584,574 @@ def print_matrix_slice_lane(start_idx: int, end_idx: int, grid_matrix, sol_stock
         
     print(f"[MATRIX INSPECT] Steps {s_idx+1} to {e_idx+1}: " + " -> ".join(output_segments))
 
+
+@dataclass
+class ConveyorSimulationState:
+    buy_prices: np.ndarray
+    sell_prices: np.ndarray
+    buy_sol: np.ndarray
+    sell_wvtc: np.ndarray
+    sell_bucket_cap_sol: float
+    overflow_wvtc: float = 0.0
+    fees_paid_sol: float = 0.0
+    fees_paid_wvtc: float = 0.0
+    trade_count: int = 0
+
+
+def create_conveyor_simulation_state(
+    rung_count: int,
+    buy_floor_sol: float,
+    buy_ceiling_sol: float,
+    initial_sol: float,
+    initial_wvtc: float,
+    sell_bucket_cap_sol: float,
+) -> ConveyorSimulationState:
+    """Builds paired geometric buy/sell rungs with independent inventory lanes."""
+    if rung_count < 2:
+        raise ValueError("The conveyor simulation requires at least two rungs.")
+    if not (0 < buy_floor_sol < buy_ceiling_sol):
+        raise ValueError("Buy floor and ceiling must be positive, with floor below ceiling.")
+    values = (
+        buy_floor_sol,
+        buy_ceiling_sol,
+        initial_sol,
+        initial_wvtc,
+        sell_bucket_cap_sol,
+        CONVEYOR_SIMULATION_FEE_RATE,
+        CONVEYOR_SIMULATION_TARGET_NET_GROWTH,
+    )
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("Conveyor simulation prices, balances, caps, and rates must be finite.")
+    if initial_sol < 0 or initial_wvtc < 0 or sell_bucket_cap_sol <= 0:
+        raise ValueError("Initial balances must be nonnegative and the sell-bucket cap positive.")
+    if not (0 <= CONVEYOR_SIMULATION_FEE_RATE < 1):
+        raise ValueError("The simulation fee rate must be at least 0 and less than 1.")
+    if not np.isfinite(MIN_ROUND_TRIP_GAP_PCT) or MIN_ROUND_TRIP_GAP_PCT <= 0:
+        raise ValueError("MIN_ROUND_TRIP_GAP_PCT must be positive.")
+    if CONVEYOR_SIMULATION_TARGET_NET_GROWTH < 0:
+        raise ValueError("The target net growth must be nonnegative.")
+    required_gap = (
+        (1 + CONVEYOR_SIMULATION_TARGET_NET_GROWTH)
+        / (1 - CONVEYOR_SIMULATION_FEE_RATE) ** 2
+    ) - 1
+    if MIN_ROUND_TRIP_GAP_PCT + 1e-12 < required_gap:
+        raise ValueError(
+            f"MIN_ROUND_TRIP_GAP_PCT ({MIN_ROUND_TRIP_GAP_PCT:.6%}) is below "
+            f"the configured fee-and-growth requirement ({required_gap:.6%})."
+        )
+
+    buy_prices = np.geomspace(buy_floor_sol, buy_ceiling_sol, rung_count)
+    sell_prices = buy_prices * (1 + MIN_ROUND_TRIP_GAP_PCT)
+    sell_wvtc = np.zeros(rung_count, dtype=float)
+    overflow_wvtc = 0.0
+    initial_wvtc_per_rung = initial_wvtc / rung_count
+    for rung_index in range(rung_count):
+        remaining_wvtc = initial_wvtc_per_rung
+        for sell_index in range(rung_index, rung_count):
+            bucket_cap_wvtc = sell_bucket_cap_sol / sell_prices[sell_index]
+            room_wvtc = max(0.0, bucket_cap_wvtc - sell_wvtc[sell_index])
+            amount_routed = min(remaining_wvtc, room_wvtc)
+            sell_wvtc[sell_index] += amount_routed
+            remaining_wvtc -= amount_routed
+            if remaining_wvtc <= 1e-12:
+                remaining_wvtc = 0.0
+                break
+        overflow_wvtc += remaining_wvtc
+
+    return ConveyorSimulationState(
+        buy_prices=buy_prices,
+        sell_prices=sell_prices,
+        buy_sol=np.full(rung_count, initial_sol / rung_count, dtype=float),
+        sell_wvtc=sell_wvtc,
+        sell_bucket_cap_sol=sell_bucket_cap_sol,
+        overflow_wvtc=overflow_wvtc,
+    )
+
+
+def simulate_conveyor_buy(
+    state: ConveyorSimulationState,
+    rung_index: int,
+    sol_to_spend: float,
+) -> dict:
+    """Buys wVTC with a buy-rung's SOL and routes net wVTC up the sell conveyor."""
+    if not 0 <= rung_index < len(state.buy_prices):
+        raise IndexError("Buy rung index is outside the configured ladder.")
+    if not np.isfinite(sol_to_spend) or sol_to_spend <= 0:
+        raise ValueError("SOL to spend must be a finite positive amount.")
+    if sol_to_spend > state.buy_sol[rung_index] + 1e-12:
+        raise ValueError("Buy amount exceeds the SOL available in that rung.")
+
+    gross_wvtc = sol_to_spend / state.buy_prices[rung_index]
+    fee_wvtc = gross_wvtc * CONVEYOR_SIMULATION_FEE_RATE
+    net_wvtc = gross_wvtc - fee_wvtc
+    state.buy_sol[rung_index] = max(0.0, state.buy_sol[rung_index] - sol_to_spend)
+
+    remaining_wvtc = net_wvtc
+    routed_wvtc = 0.0
+    for sell_index in range(rung_index, len(state.sell_prices)):
+        bucket_cap_wvtc = state.sell_bucket_cap_sol / state.sell_prices[sell_index]
+        room_wvtc = max(0.0, bucket_cap_wvtc - state.sell_wvtc[sell_index])
+        amount_routed = min(remaining_wvtc, room_wvtc)
+        state.sell_wvtc[sell_index] += amount_routed
+        remaining_wvtc -= amount_routed
+        routed_wvtc += amount_routed
+        if remaining_wvtc <= 1e-12:
+            remaining_wvtc = 0.0
+            break
+
+    state.overflow_wvtc += remaining_wvtc
+    state.fees_paid_wvtc += fee_wvtc
+    state.trade_count += 1
+    return {
+        "side": "BUY",
+        "rung": rung_index + 1,
+        "price_sol_per_wvtc": state.buy_prices[rung_index],
+        "sol_spent": sol_to_spend,
+        "gross_wvtc": gross_wvtc,
+        "fee_wvtc": fee_wvtc,
+        "net_wvtc": net_wvtc,
+        "routed_wvtc": routed_wvtc,
+        "overflow_wvtc": remaining_wvtc,
+    }
+
+
+def simulate_conveyor_sell(
+    state: ConveyorSimulationState,
+    rung_index: int,
+    wvtc_to_sell: float,
+) -> dict:
+    """Sells wVTC at a sell rung and returns net SOL to its paired buy rung."""
+    if not 0 <= rung_index < len(state.sell_prices):
+        raise IndexError("Sell rung index is outside the configured ladder.")
+    if not np.isfinite(wvtc_to_sell) or wvtc_to_sell <= 0:
+        raise ValueError("wVTC to sell must be a finite positive amount.")
+    if wvtc_to_sell > state.sell_wvtc[rung_index] + 1e-12:
+        raise ValueError("Sell amount exceeds the wVTC available in that rung.")
+
+    gross_sol = wvtc_to_sell * state.sell_prices[rung_index]
+    fee_sol = gross_sol * CONVEYOR_SIMULATION_FEE_RATE
+    net_sol = gross_sol - fee_sol
+    state.sell_wvtc[rung_index] = max(0.0, state.sell_wvtc[rung_index] - wvtc_to_sell)
+    state.buy_sol[rung_index] += net_sol
+    state.fees_paid_sol += fee_sol
+    state.trade_count += 1
+    return {
+        "side": "SELL",
+        "rung": rung_index + 1,
+        "price_sol_per_wvtc": state.sell_prices[rung_index],
+        "wvtc_sold": wvtc_to_sell,
+        "gross_sol": gross_sol,
+        "fee_sol": fee_sol,
+        "net_sol": net_sol,
+        "paired_buy_rung": rung_index + 1,
+    }
+
+
+def print_conveyor_ladder(state: ConveyorSimulationState, event_number: int) -> None:
+    """Displays both sides of the ladder after one simulated event."""
+    print(f"  [LADDER AFTER EVENT {event_number:03d}]")
+    print("  Rung | Buy price (SOL/wVTC) | Buy SOL | Sell price (SOL/wVTC) | Sell wVTC | Sell cap (SOL)")
+    for rung_index, (buy_price, sell_price, buy_sol, sell_wvtc) in enumerate(
+        zip(state.buy_prices, state.sell_prices, state.buy_sol, state.sell_wvtc),
+        start=1,
+    ):
+        sell_value_sol = sell_wvtc * sell_price
+        print(
+            f"  {rung_index:4d} | {buy_price:19.10f} | {buy_sol:7.4f} | "
+            f"{sell_price:21.10f} | {sell_wvtc:9.2f} | "
+            f"{sell_value_sol:6.3f}/{state.sell_bucket_cap_sol:.3f}"
+        )
+    print(f"  Above-top-rung overflow: {state.overflow_wvtc:.2f} wVTC")
+
+
+def run_random_conveyor_simulation() -> ConveyorSimulationState:
+    """Runs seeded random fills against the synthetic geometric wVTC/SOL ladder."""
+    if CONVEYOR_SIMULATION_EVENTS < 0:
+        raise ValueError("CONVEYOR_SIMULATION_EVENTS must be nonnegative.")
+    state = create_conveyor_simulation_state(
+        rung_count=CONVEYOR_SIMULATION_RUNGS,
+        buy_floor_sol=CONVEYOR_SIMULATION_BUY_FLOOR_SOL,
+        buy_ceiling_sol=CONVEYOR_SIMULATION_BUY_CEILING_SOL,
+        initial_sol=CONVEYOR_SIMULATION_INITIAL_SOL,
+        initial_wvtc=CONVEYOR_SIMULATION_INITIAL_WVTC,
+        sell_bucket_cap_sol=CONVEYOR_SIMULATION_SELL_BUCKET_CAP_SOL,
+    )
+    rng = random.Random(CONVEYOR_SIMULATION_SEED)
+    mark_price = float(np.sqrt(state.buy_prices[0] * state.buy_prices[-1]))
+    initial_mark_value_sol = float(np.sum(state.buy_sol) + np.sum(state.sell_wvtc) * mark_price)
+
+    print("[CONVEYOR SIMULATION] Synthetic wVTC/SOL prices; no RPC or swaps are used.")
+    print(
+        f"  Rungs: {CONVEYOR_SIMULATION_RUNGS} | Events: {CONVEYOR_SIMULATION_EVENTS} "
+        f"| Seed: {CONVEYOR_SIMULATION_SEED} | Fee/side: {CONVEYOR_SIMULATION_FEE_RATE:.3%}"
+    )
+    print(
+        f"  Buy range: {state.buy_prices[0]:.10f}-{state.buy_prices[-1]:.10f} SOL/wVTC "
+        f"| Paired sell gap: {MIN_ROUND_TRIP_GAP_PCT:.3%} "
+        f"| Expected net round-trip growth: "
+        f"{((1 + MIN_ROUND_TRIP_GAP_PCT) * (1 - CONVEYOR_SIMULATION_FEE_RATE) ** 2 - 1):.3%}"
+    )
+    print(
+        f"  Sell-bucket cap: {state.sell_bucket_cap_sol:.4f} SOL "
+        f"| Initial: {np.sum(state.buy_sol):.4f} SOL, {np.sum(state.sell_wvtc):.4f} wVTC"
+    )
+
+    for event_number in range(1, CONVEYOR_SIMULATION_EVENTS + 1):
+        side = rng.choice(("BUY", "SELL"))
+        buy_rungs = np.flatnonzero(state.buy_sol > 1e-12)
+        sell_rungs = np.flatnonzero(state.sell_wvtc > 1e-12)
+
+        if side == "BUY" and len(buy_rungs) == 0:
+            side = "SELL"
+        elif side == "SELL" and len(sell_rungs) == 0:
+            side = "BUY"
+
+        if side == "BUY" and len(buy_rungs) > 0:
+            rung_index = int(rng.choice(buy_rungs))
+            amount = float(state.buy_sol[rung_index] * rng.uniform(0.10, 1.0))
+            result = simulate_conveyor_buy(state, rung_index, amount)
+            print(
+                f"[{event_number:03d}] BUY  rung {result['rung']:02d} | "
+                f"{result['sol_spent']:.6f} SOL -> {result['net_wvtc']:.2f} wVTC "
+                f"(fee {result['fee_wvtc']:.2f} wVTC; "
+                f"routed {result['routed_wvtc']:.2f}; overflow {result['overflow_wvtc']:.2f})"
+            )
+        elif side == "SELL" and len(sell_rungs) > 0:
+            rung_index = int(rng.choice(sell_rungs))
+            amount = float(state.sell_wvtc[rung_index] * rng.uniform(0.10, 1.0))
+            result = simulate_conveyor_sell(state, rung_index, amount)
+            print(
+                f"[{event_number:03d}] SELL rung {result['rung']:02d} | "
+                f"{result['wvtc_sold']:.2f} wVTC -> {result['net_sol']:.8f} SOL "
+                f"(fee {result['fee_sol']:.8f} SOL; "
+                f"routed to buy rung {result['paired_buy_rung']:02d})"
+            )
+        else:
+            print(f"[{event_number:03d}] No executable inventory; simulation stopped early.")
+            break
+
+        print_conveyor_ladder(state, event_number)
+
+    final_sol = float(np.sum(state.buy_sol))
+    final_wvtc = float(np.sum(state.sell_wvtc) + state.overflow_wvtc)
+    final_mark_value_sol = final_sol + final_wvtc * mark_price
+    print("[CONVEYOR SUMMARY]")
+    print(f"  Executed events: {state.trade_count}")
+    print(f"  Buy-side SOL remaining: {final_sol:.8f} SOL")
+    print(f"  Sell-side wVTC remaining: {np.sum(state.sell_wvtc):.4f} wVTC")
+    print(f"  Above-top-rung overflow: {state.overflow_wvtc:.4f} wVTC")
+    print(f"  Fees paid: {state.fees_paid_sol:.8f} SOL + {state.fees_paid_wvtc:.4f} wVTC")
+    print(
+        f"  Synthetic mark value: {initial_mark_value_sol:.8f} -> "
+        f"{final_mark_value_sol:.8f} SOL (mark {mark_price:.10f} SOL/wVTC)"
+    )
+    return state
+
+
+@dataclass
+class UsdcSolConveyorState:
+    buy_prices: np.ndarray
+    sell_prices: np.ndarray
+    buy_usdc: np.ndarray
+    sell_sol: np.ndarray
+    sell_bucket_cap_sol: float
+    overflow_sol: float = 0.0
+    fees_paid_usdc: float = 0.0
+    fees_paid_sol: float = 0.0
+    trade_count: int = 0
+
+
+def create_usdc_sol_conveyor_state() -> UsdcSolConveyorState:
+    """Creates a geometric USDC/SOL ladder with USDC buys and SOL sells."""
+    rung_count = CONVEYOR_SIMULATION_RUNGS
+    values = (
+        USDC_SOL_SIMULATION_BUY_FLOOR,
+        USDC_SOL_SIMULATION_BUY_CEILING,
+        USDC_SOL_SIMULATION_INITIAL_USDC,
+        USDC_SOL_SIMULATION_INITIAL_SOL,
+        USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL,
+        CONVEYOR_SIMULATION_FEE_RATE,
+        CONVEYOR_SIMULATION_TARGET_NET_GROWTH,
+        MIN_ROUND_TRIP_GAP_PCT,
+    )
+    if rung_count < 2:
+        raise ValueError("The USDC/SOL conveyor simulation requires at least two rungs.")
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("USDC/SOL simulation prices, balances, caps, and rates must be finite.")
+    if not (0 < USDC_SOL_SIMULATION_BUY_FLOOR < USDC_SOL_SIMULATION_BUY_CEILING):
+        raise ValueError("USDC/SOL buy floor and ceiling must be positive, with floor below ceiling.")
+    if USDC_SOL_SIMULATION_INITIAL_USDC < 0 or USDC_SOL_SIMULATION_INITIAL_SOL < 0:
+        raise ValueError("Initial USDC and SOL balances must be nonnegative.")
+    if USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL <= 0:
+        raise ValueError("The sell-bucket SOL cap must be positive.")
+    if not (0 <= CONVEYOR_SIMULATION_FEE_RATE < 1):
+        raise ValueError("The simulation fee rate must be at least 0 and less than 1.")
+    if CONVEYOR_SIMULATION_TARGET_NET_GROWTH < 0:
+        raise ValueError("The target net growth must be nonnegative.")
+    # Corrected equation: removes the squared denominator flaw to use flat total-fee cuts
+    #required_gap = (((1 + CONVEYOR_SIMULATION_TARGET_NET_GROWTH) / (1 - CONVEYOR_SIMULATION_FEE_RATE) ** 2)) - 1
+    required_gap = ((1 + CONVEYOR_SIMULATION_TARGET_NET_GROWTH) / (1 - (CONVEYOR_SIMULATION_FEE_RATE * 2))) - 1
+
+    if MIN_ROUND_TRIP_GAP_PCT + 1e-12 < required_gap:
+        raise ValueError(
+            f"MIN_ROUND_TRIP_GAP_PCT ({MIN_ROUND_TRIP_GAP_PCT:.6%}) is below "
+            f"the configured fee-and-growth requirement ({required_gap:.6%})."
+        )
+
+    buy_prices = np.geomspace(
+        USDC_SOL_SIMULATION_BUY_FLOOR,
+        USDC_SOL_SIMULATION_BUY_CEILING,
+        rung_count,
+    )
+    sell_prices = buy_prices * (1 + MIN_ROUND_TRIP_GAP_PCT)
+    sell_sol = np.zeros(rung_count, dtype=float)
+    overflow_sol = 0.0
+    initial_sol_per_rung = USDC_SOL_SIMULATION_INITIAL_SOL / rung_count
+    for rung_index in range(rung_count):
+        remaining_sol = initial_sol_per_rung
+        for sell_index in range(rung_index, rung_count):
+            room_sol = max(0.0, USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL - sell_sol[sell_index])
+            amount_routed = min(remaining_sol, room_sol)
+            sell_sol[sell_index] += amount_routed
+            remaining_sol -= amount_routed
+            if remaining_sol <= 1e-12:
+                remaining_sol = 0.0
+                break
+        overflow_sol += remaining_sol
+
+    return UsdcSolConveyorState(
+        buy_prices=buy_prices,
+        sell_prices=sell_prices,
+        buy_usdc=np.full(
+            rung_count,
+            USDC_SOL_SIMULATION_INITIAL_USDC / rung_count,
+            dtype=float,
+        ),
+        sell_sol=sell_sol,
+        sell_bucket_cap_sol=USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL,
+        overflow_sol=overflow_sol,
+    )
+
+
+def simulate_usdc_sol_buy(
+    state: UsdcSolConveyorState,
+    rung_index: int,
+    usdc_to_spend: float,
+) -> dict:
+    """Buys SOL using a USDC rung and routes net SOL up the sell conveyor."""
+    if not 0 <= rung_index < len(state.buy_prices):
+        raise IndexError("Buy rung index is outside the USDC/SOL ladder.")
+    if not np.isfinite(usdc_to_spend) or usdc_to_spend <= 0:
+        raise ValueError("USDC to spend must be a finite positive amount.")
+    if usdc_to_spend > state.buy_usdc[rung_index] + 1e-12:
+        raise ValueError("Buy amount exceeds the USDC available in that rung.")
+
+    gross_sol = usdc_to_spend / state.buy_prices[rung_index]
+    fee_sol = gross_sol * CONVEYOR_SIMULATION_FEE_RATE
+    net_sol = gross_sol - fee_sol
+    state.buy_usdc[rung_index] = max(0.0, state.buy_usdc[rung_index] - usdc_to_spend)
+
+    remaining_sol = net_sol
+    routed_sol = 0.0
+    for sell_index in range(rung_index, len(state.sell_prices)):
+        room_sol = max(0.0, state.sell_bucket_cap_sol - state.sell_sol[sell_index])
+        amount_routed = min(remaining_sol, room_sol)
+        state.sell_sol[sell_index] += amount_routed
+        remaining_sol -= amount_routed
+        routed_sol += amount_routed
+        if remaining_sol <= 1e-12:
+            remaining_sol = 0.0
+            break
+
+    state.overflow_sol += remaining_sol
+    state.fees_paid_sol += fee_sol
+    state.trade_count += 1
+    return {
+        "rung": rung_index + 1,
+        "usdc_spent": usdc_to_spend,
+        "price_usdc_per_sol": state.buy_prices[rung_index],
+        "gross_sol": gross_sol,
+        "fee_sol": fee_sol,
+        "net_sol": net_sol,
+        "routed_sol": routed_sol,
+        "overflow_sol": remaining_sol,
+    }
+
+
+def simulate_usdc_sol_sell(
+    state: UsdcSolConveyorState,
+    rung_index: int,
+    sol_to_sell: float,
+) -> dict:
+    """Sells SOL at a sell rung and returns net USDC to its paired buy rung."""
+    if not 0 <= rung_index < len(state.sell_prices):
+        raise IndexError("Sell rung index is outside the USDC/SOL ladder.")
+    if not np.isfinite(sol_to_sell) or sol_to_sell <= 0:
+        raise ValueError("SOL to sell must be a finite positive amount.")
+    if sol_to_sell > state.sell_sol[rung_index] + 1e-12:
+        raise ValueError("Sell amount exceeds the SOL available in that rung.")
+
+    gross_usdc = sol_to_sell * state.sell_prices[rung_index]
+    fee_usdc = gross_usdc * CONVEYOR_SIMULATION_FEE_RATE
+    net_usdc = gross_usdc - fee_usdc
+    state.sell_sol[rung_index] = max(0.0, state.sell_sol[rung_index] - sol_to_sell)
+    state.buy_usdc[rung_index] += net_usdc
+    state.fees_paid_usdc += fee_usdc
+    state.trade_count += 1
+    return {
+        "rung": rung_index + 1,
+        "sol_sold": sol_to_sell,
+        "price_usdc_per_sol": state.sell_prices[rung_index],
+        "gross_usdc": gross_usdc,
+        "fee_usdc": fee_usdc,
+        "net_usdc": net_usdc,
+        "paired_buy_rung": rung_index + 1,
+    }
+
+
+def print_usdc_sol_ladder(
+    state: UsdcSolConveyorState,
+    event_number: int,
+    buy_rung_index: int,
+    sell_rung_index: int,
+) -> None:
+    """Displays USDC buy and SOL sell inventories after one event."""
+    print(f"  [USDC/SOL LADDER AFTER EVENT {event_number:03d}]")
+    print(
+        f"  Active buy rung: {buy_rung_index + 1} | "
+        f"Active sell rung: {sell_rung_index + 1}"
+    )
+    print("  Rung | Buy price (USDC/SOL) | Buy USDC | Sell price (USDC/SOL) | Sell SOL | SOL cap")
+    for rung_index, (buy_price, sell_price, buy_usdc, sell_sol) in enumerate(
+        zip(state.buy_prices, state.sell_prices, state.buy_usdc, state.sell_sol),
+        start=1,
+    ):
+        print(
+            f"  {rung_index:4d} | {buy_price:20.6f} | {buy_usdc:8.2f} | "
+            f"{sell_price:21.6f} | {sell_sol:8.4f} | "
+            f"{sell_sol:6.3f}/{state.sell_bucket_cap_sol:.3f}"
+        )
+    print(f"  Above-top-rung overflow: {state.overflow_sol:.8f} SOL")
+
+
+def run_random_usdc_sol_simulation() -> UsdcSolConveyorState:
+    """Runs random USDC/SOL fills, advancing each side only after bucket exhaustion."""
+    if CONVEYOR_SIMULATION_EVENTS < 0:
+        raise ValueError("CONVEYOR_SIMULATION_EVENTS must be nonnegative.")
+    state = create_usdc_sol_conveyor_state()
+    rng = random.Random(CONVEYOR_SIMULATION_SEED)
+    buy_rung_index = len(state.buy_prices) // 2
+    sell_rung_index = buy_rung_index
+    mark_price = float(np.sqrt(state.buy_prices[0] * state.buy_prices[-1]))
+    initial_value_usdc = float(
+        np.sum(state.buy_usdc) + (np.sum(state.sell_sol) + state.overflow_sol) * mark_price
+    )
+
+    print("[USDC/SOL CONVEYOR SIMULATION] Synthetic prices; no RPC or swaps are used.")
+    print(
+        f"  Rungs: {CONVEYOR_SIMULATION_RUNGS} | Events: {CONVEYOR_SIMULATION_EVENTS} "
+        f"| Seed: {CONVEYOR_SIMULATION_SEED} | Fee/side: {CONVEYOR_SIMULATION_FEE_RATE:.3%}"
+    )
+    print(
+        f"  Buy range: {state.buy_prices[0]:.6f}-{state.buy_prices[-1]:.6f} USDC/SOL "
+        f"| Paired sell gap: {MIN_ROUND_TRIP_GAP_PCT:.3%}"
+    )
+    print(
+        f"  Sell bucket cap: {state.sell_bucket_cap_sol:.4f} SOL "
+        f"| Initial: {np.sum(state.buy_usdc):.2f} USDC, "
+        f"{np.sum(state.sell_sol) + state.overflow_sol:.4f} SOL"
+    )
+    print(
+        f"  Starting buy/sell rung: {buy_rung_index + 1} "
+        f"({state.buy_prices[buy_rung_index]:.6f} USDC/SOL)"
+    )
+
+    for event_number in range(1, CONVEYOR_SIMULATION_EVENTS + 1):
+        side = rng.choice(("BUY", "SELL"))
+        if side == "BUY":
+            if state.buy_usdc[buy_rung_index] <= 1e-9 and buy_rung_index > 0:
+                buy_rung_index -= 1
+            rung_index = buy_rung_index
+            available_usdc = state.buy_usdc[rung_index]
+            if available_usdc > 1e-12:
+                fraction = rng.choice((0.10, 0.25, 0.50, 0.75, 1.0))
+                amount = float(available_usdc * fraction)
+                result = simulate_usdc_sol_buy(state, rung_index, amount)
+            else:
+                result = None
+            if result is not None:
+                exhausted = state.buy_usdc[rung_index] <= 1e-9
+                next_action = (
+                    "bucket exhausted; next BUY may move down one rung"
+                    if exhausted and rung_index > 0
+                    else "at lowest rung"
+                    if exhausted
+                    else f"{state.buy_usdc[rung_index]:.4f} USDC remains; stay on this rung"
+                )
+                print(
+                    f"[{event_number:03d}] BUY  rung {rung_index + 1:02d} "
+                    f"{result['usdc_spent']:.4f} USDC -> {result['net_sol']:.8f} SOL "
+                    f"(fee {result['fee_sol']:.8f} SOL; routed to sell rung {rung_index + 1:02d}; "
+                    f"overflow {result['overflow_sol']:.8f} SOL; {next_action})"
+                )
+            else:
+                print(
+                    f"[{event_number:03d}] BUY  rung {rung_index + 1:02d} | "
+                    "No USDC available at the lower boundary; no fill."
+                )
+        else:
+            if (
+                state.sell_sol[sell_rung_index] <= 1e-9
+                and sell_rung_index < len(state.sell_prices) - 1
+            ):
+                sell_rung_index += 1
+            rung_index = sell_rung_index
+            available_sol = state.sell_sol[rung_index]
+            if available_sol > 1e-12:
+                fraction = rng.choice((0.10, 0.25, 0.50, 0.75, 1.0))
+                amount = float(available_sol * fraction)
+                result = simulate_usdc_sol_sell(state, rung_index, amount)
+            else:
+                result = None
+            if result is not None:
+                exhausted = state.sell_sol[rung_index] <= 1e-9
+                next_action = (
+                    "bucket exhausted; next SELL may move up one rung"
+                    if exhausted and rung_index < len(state.sell_prices) - 1
+                    else "at highest rung"
+                    if exhausted
+                    else f"{state.sell_sol[rung_index]:.8f} SOL remains; stay on this rung"
+                )
+                print(
+                    f"[{event_number:03d}] SELL rung {rung_index + 1:02d} "
+                    f"{result['sol_sold']:.8f} SOL -> {result['net_usdc']:.4f} USDC "
+                    f"(fee {result['fee_usdc']:.4f} USDC; routed to buy rung {rung_index + 1:02d}; "
+                    f"{next_action})"
+                )
+            else:
+                print(
+                    f"[{event_number:03d}] SELL rung {rung_index + 1:02d} | "
+                    "No SOL available at the upper boundary; no fill."
+                )
+
+        print_usdc_sol_ladder(state, event_number, buy_rung_index, sell_rung_index)
+
+    final_usdc = float(np.sum(state.buy_usdc))
+    final_sol = float(np.sum(state.sell_sol) + state.overflow_sol)
+    final_value_usdc = final_usdc + final_sol * mark_price
+    print("[USDC/SOL CONVEYOR SUMMARY]")
+    print(f"  Executed events: {state.trade_count}")
+    print(f"  Buy-side USDC remaining: {final_usdc:.4f} USDC")
+    print(f"  Sell-side SOL remaining: {np.sum(state.sell_sol):.8f} SOL")
+    print(f"  Above-top-rung overflow: {state.overflow_sol:.8f} SOL")
+    print(f"  Fees paid: {state.fees_paid_usdc:.6f} USDC + {state.fees_paid_sol:.8f} SOL")
+    print(
+        f"  Synthetic mark value: {initial_value_usdc:.4f} -> "
+        f"{final_value_usdc:.4f} USDC (mark {mark_price:.6f} USDC/SOL)"
+    )
+    return state
+
+
 async def main():
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
@@ -522,7 +1163,10 @@ async def main():
             
         print("[CONNECTION] Remote Procedure Call (RPC) Node Status: ONLINE")
         await check_wallet_fuel(client)
-        
+        # PHASE 2 WALLET BALANCES INTERROGATION PASS
+        print("[WALLET INTERROGATION] Pulling live token balances from blockchain...")
+        real_usdc_balance = await fetch_live_token_balance(client, "USDC")
+        real_wvtc_balance = await fetch_live_token_balance(client, "wVTC")
         # ==============================================================================
         # ?? THE BOOT CALIBRATION FIX: FORCE REAL SPOT PRICE TO BUILD THE LADDER
         # ==============================================================================
@@ -779,6 +1423,11 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        if "--usdc-sol-sim" in sys.argv[1:]:
+            run_random_usdc_sol_simulation()
+        elif "--conveyor-sim" in sys.argv[1:]:
+            run_random_conveyor_simulation()
+        else:
+            asyncio.run(main())
     except KeyboardInterrupt:
         print("[SYSTEM SHUTDOWN] Execution loops cleanly terminated by developer instruction.")
