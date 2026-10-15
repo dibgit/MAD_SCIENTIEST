@@ -128,7 +128,10 @@ TOKEN_MINTS = {
     "SOL": "So11111111111111111111111111111111111111112",
     "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-    "wVTC": "PASTE_DECENTRALIZED_WVTC_MINT_ADDRESS_HERE" 
+    #"wVTC": "PASTE_DECENTRALIZED_WVTC_MINT_ADDRESS_HERE"
+    # ADVANCE TARGET: For the time being, we use a real live placeholder token string 
+    # to guarantee the RPC nodes return a valid account balance structure instead of crashing.
+    "wVTC": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" # (Temporarily mapping to USDT for safe boot tracing)
 }
 # Permanent Pyth Network Mainnet Price Oracle Mapping Index
 ORACLE_FEEDS = {
