@@ -1267,9 +1267,6 @@ async def main():
                     
                     print(f"[CROSSING DETECTED] Index Shift Detected: {direction} By: {steps_moved} Tiers")
                     
-                                        # ==============================================================================
-                    # SIMPLIFIED NATIVE BUCKET PARTIAL FILL CORE MATRIX (N=257 STEPS PERMANENT)
-                    # ==============================================================================
                     if direction == "UPWARD":
                         for step in range(previous_tier_index, current_tier_index + 1):
                             if sol_stock[step] > 0:
@@ -1302,7 +1299,13 @@ async def main():
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
                                 raw_lamports_sold = int((tokens_to_liquidate * fill_percentage) * 1_000_000_000)
                                 if raw_lamports_sold > 0:
-                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["SOL"], TOKEN_MINTS["USDC"], raw_lamports_sold, "SOL -> USDC SWAP")
+                                    prepare_onchain_dex_swap(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["SOL"],
+                                        quote_mint=TOKEN_MINTS["USDC"],
+                                        amount_in=raw_lamports_sold,
+                                        slide_direction="PARTIAL SOL -> USDC SWAP"
+                                    )
                                 
                                 # If fully converted to cash, check for profit overflow
                                 if sol_stock[step] <= 1e-12:
@@ -1337,21 +1340,26 @@ async def main():
                                 tokens_credited = clean_asset_bought * fill_percentage
                                 cash_remaining = cash_to_deploy * (1.0 - fill_percentage)
                                 
+                                # Secure the exact active split metrics directly on the step line
                                 sol_stock[step] += tokens_credited
                                 usdc_stock[step] = cash_remaining
                                 
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
                                 raw_usdc_atoms_spent = int((cash_to_deploy * fill_percentage) * 1_000_000)
                                 if raw_usdc_atoms_spent > 0:
-                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["USDC"], TOKEN_MINTS["SOL"], raw_usdc_atoms_spent, "USDC -> SOL SWAP")
+                                    prepare_onchain_dex_swap(
+                                        wallet_keypair=sandbox_signer_keypair,
+                                        base_mint=TOKEN_MINTS["USDC"],
+                                        quote_mint=TOKEN_MINTS["SOL"],
+                                        amount_in=raw_usdc_atoms_spent,
+                                        slide_direction="PARTIAL USDC -> SOL SWAP"
+                                    )
                                     
                                 if usdc_stock[step] <= 1e-9:
                                     usdc_stock[step] = 0.0
                                     print(f"  [RESOLUTION] Step {step+1} fully converted to pure Asset state (Yn+1).")
                                 else:
                                     print(f"  [PARTIAL FILL] Step {step+1} partially bought. Remaining cash: ${usdc_stock[step]:.2f} USDC.")
-
-
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
                     # INJECT THE NEW LOGGER HERE: Pass all current system states directly to your CSV file
@@ -1393,11 +1401,18 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        if "--usdc-sol-sim" in sys.argv[1:]:
+        # Collect and sanitize all active execution flags passed via PowerShell
+        execution_args = sys.argv[1:]
+        
+        if "--usdc-sol-sim" in execution_args:
+            # Route to your preferred scannable dollar conveyor test-bench
             run_random_usdc_sol_simulation()
-        elif "--conveyor-sim" in sys.argv[1:]:
+        elif "--conveyor-sim" in execution_args:
+            # Route to the native synthetic fractional token loop
             run_random_conveyor_simulation()
         else:
+            # DEFAULT PRODUCTION TRACK: Fire up the authoritative live Web3 grid engine
             asyncio.run(main())
+            
     except KeyboardInterrupt:
-        print("[SYSTEM SHUTDOWN] Execution loops cleanly terminated by developer instruction.")
+        print("\n[SYSTEM SHUTDOWN] Execution loops cleanly terminated by developer instruction.")
