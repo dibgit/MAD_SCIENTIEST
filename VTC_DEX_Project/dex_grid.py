@@ -1227,9 +1227,6 @@ async def main():
 
         # Generates a volatile sandbox keypair structure for testing (Safe, un-funded developer key)
         sandbox_signer_keypair = Keypair()
-        
-        # State memory to prevent simultaneous compound splits across different rows
-        active_split_step = None 
 
         while True:
             loop_counter += 1
@@ -1270,12 +1267,11 @@ async def main():
                     
                     print(f"[CROSSING DETECTED] Index Shift Detected: {direction} By: {steps_moved} Tiers")
                     
+                                        # ==============================================================================
+                    # SIMPLIFIED NATIVE BUCKET PARTIAL FILL CORE MATRIX (N=257 STEPS PERMANENT)
+                    # ==============================================================================
                     if direction == "UPWARD":
                         for step in range(previous_tier_index, current_tier_index + 1):
-                            if active_split_step is not None and active_split_step != step:
-                                print(f"  [LADDER LOCKOUT] Step {step+1} locked. Split active at Step {active_split_step+1}!")
-                                continue
-                                
                             if sol_stock[step] > 0:
                                 tokens_to_liquidate = sol_stock[step]
                                 raw_proceeds = tokens_to_liquidate * grid_matrix[step]
@@ -1284,7 +1280,6 @@ async def main():
                                 
                                 # ---- DUAL-MODE CONDITIONAL LOCK ----
                                 if RUN_SIMULATION_PRICE_SHIFTER:
-                                    # Enforce your local laboratory partial execution test parameters
                                     fill_percentage = 0.60
                                 else:
                                     # Production Track: Trigger real Web3 swaps and await block confirmation receipts
@@ -1297,6 +1292,7 @@ async def main():
                                     )
                                 # ------------------------------------
                                 
+                                # NATIVE STEP RE-BALANCING: Each node absorbs its own execution slice
                                 cash_realized = clean_proceeds * fill_percentage
                                 asset_remaining = tokens_to_liquidate * (1.0 - fill_percentage)
                                 
@@ -1306,37 +1302,19 @@ async def main():
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
                                 raw_lamports_sold = int((tokens_to_liquidate * fill_percentage) * 1_000_000_000)
                                 if raw_lamports_sold > 0:
-                                    prepare_onchain_dex_swap(
-                                        wallet_keypair=sandbox_signer_keypair,
-                                        base_mint=TOKEN_MINTS["SOL"],
-                                        quote_mint=TOKEN_MINTS["USDC"],
-                                        amount_in=raw_lamports_sold,
-                                        slide_direction="PARTIAL SOL -> USDC SWAP"
-                                    )
+                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["SOL"], TOKEN_MINTS["USDC"], raw_lamports_sold, "SOL -> USDC SWAP")
                                 
-                                # Check the exact state of the step index
-                                if sol_stock[step] > 0 and usdc_stock[step] > 0:
-                                    active_split_step = step
-                                    print(f"  [PARTIAL STEP SPLIT (N=258)] Step {step+1} divided into dual states:")
-                                    print(f"    -> Cash Node  (Xn+1) : ${usdc_stock[step]:.4f} USDC")
-                                    print(f"    -> Asset Node (Yn+1) : {sol_stock[step]:.6f} SOL")
-                                else:
-                                    # GOOD CASE RESOLUTION: Asset completely filled down to 0
-                                    if active_split_step == step:
-                                        active_split_step = None
-                                    print(f"  [GOOD CASE RESOLUTION (N=257)] Step {step+1} fully converted into Cash (Xn+1).")
-                                    
-                                    # SIPHON YOUR REAL PROFITS HERE ONLY UPON COMPLETION:
-                                    # Calculate your actual net compounding value gains to store in the vault
+                                # If fully converted to cash, check for profit overflow
+                                if sol_stock[step] <= 1e-12:
+                                    sol_stock[step] = 0.0
+                                    print(f"  [RESOLUTION] Step {step+1} fully converted into Cash (Xn+1).")
                                     check_bucket_overflow(step, sol_stock, usdc_stock, grid_matrix)
+                                else:
+                                    print(f"  [PARTIAL FILL] Step {step+1} partially sold. Holding remaining: {sol_stock[step]:.6f} SOL.")
 
                     else:
                         # Price dropped down to the buy part (DOWNWARD Trend)
                         for step in range(current_tier_index, previous_tier_index + 1):
-                            if active_split_step is not None and active_split_step != step:
-                                print(f"  [LADDER LOCKOUT] Step {step+1} locked. Split active at Step {active_split_step+1}!")
-                                continue
-                                
                             if usdc_stock[step] > 0:
                                 cash_to_deploy = usdc_stock[step]
                                 raw_asset_bought = cash_to_deploy / grid_matrix[step]
@@ -1359,31 +1337,20 @@ async def main():
                                 tokens_credited = clean_asset_bought * fill_percentage
                                 cash_remaining = cash_to_deploy * (1.0 - fill_percentage)
                                 
-                                # Secure the exact active split metrics directly on the step line
                                 sol_stock[step] += tokens_credited
                                 usdc_stock[step] = cash_remaining
                                 
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
                                 raw_usdc_atoms_spent = int((cash_to_deploy * fill_percentage) * 1_000_000)
                                 if raw_usdc_atoms_spent > 0:
-                                    prepare_onchain_dex_swap(
-                                        wallet_keypair=sandbox_signer_keypair,
-                                        base_mint=TOKEN_MINTS["USDC"],
-                                        quote_mint=TOKEN_MINTS["SOL"],
-                                        amount_in=raw_usdc_atoms_spent,
-                                        slide_direction="PARTIAL USDC -> SOL SWAP"
-                                    )
+                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["USDC"], TOKEN_MINTS["SOL"], raw_usdc_atoms_spent, "USDC -> SOL SWAP")
                                     
-                                if sol_stock[step] > 0 and usdc_stock[step] > 0:
-                                    active_split_step = step
-                                    print(f"  [PARTIAL STEP SPLIT (N=258)] Step {step+1} divided into dual states:")
-                                    print(f"    -> Asset Node (Yn)   : {sol_stock[step]:.6f} SOL")
-                                    print(f"    -> Cash Node  (Ym-1) : ${usdc_stock[step]:.4f} USDC")
+                                if usdc_stock[step] <= 1e-9:
+                                    usdc_stock[step] = 0.0
+                                    print(f"  [RESOLUTION] Step {step+1} fully converted to pure Asset state (Yn+1).")
                                 else:
-                                    # BAD CASE RESOLUTION: Price flipped back up, erasing partial cash allocations
-                                    if active_split_step == step:
-                                        active_split_step = None
-                                    print(f"  [BAD CASE RESOLUTION (N=257)] Step {step+1} completely returned to pure Asset state (Yn+1).")
+                                    print(f"  [PARTIAL FILL] Step {step+1} partially bought. Remaining cash: ${usdc_stock[step]:.2f} USDC.")
+
 
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
