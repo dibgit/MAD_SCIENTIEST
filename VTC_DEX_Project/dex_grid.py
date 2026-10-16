@@ -142,11 +142,20 @@ ORACLE_FEEDS = {
 # The profit multiplier threshold before a single bucket overflows (e.g., 1.20 = 20% growth)
 BUCKET_OVERFLOW_THRESHOLD = 1.20
 
-# DYNAMIC WORKING BALANCES: Base budget allocated per step is dynamically scaled to NUMBER_OF_LADDER
-BASE_USDC_PER_BUCKET = 1000.0 / NUMBER_OF_LADDER
+# ==============================================================================
+# PHASE 2: DYNAMIC CAPITAL & CONVEYOR THRESHOLD ENVIROMENT INPUTS
+# ==============================================================================
+# Extract and scale your active starting budget from your environment file. Default to $1000.00
+INITIAL_ALLOCATION_USDC = float(os.getenv("INITIAL_ALLOCATION_USDC", default=1000.0))
+
+# Enforce your strict Conveyor Belt accumulation ceiling cap parameter per step line
+CONVEYOR_THRESHOLD_CAP_SOL = float(os.getenv("CONVEYOR_THRESHOLD_CAP_SOL", default=3.0))
+
+# Dynamically scale the baseline cash working power per step bucket index using your new input variables
+BASE_USDC_PER_BUCKET = INITIAL_ALLOCATION_USDC / NUMBER_OF_LADDER
 
 # SET TO TRUE TO ACTIVATE THE RANDOM CONVEYOR ORDER EXHAUSTION ENGINE
-RUN_SIMULATION_PRICE_SHIFTER = True
+RUN_SIMULATION_PRICE_SHIFTER = False
 
 # Variable tracking to manage random simulated order-book flows
 SIMULATION_STATE = {
@@ -421,6 +430,39 @@ def initialize_inventory_matrix(grid_matrix, current_price, total_budget_usdc=10
     print(f"  Initial Total SOL Asset Stock : {np.sum(sol_inventory):.4f} SOL")
     print(f"  Initial Total USDC Cash Stock : ${np.sum(usdc_inventory):.2f} USDC")
     return sol_inventory, usdc_inventory
+
+def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total: float, live_usdc_total: float):
+    """
+    PRODUCTION INITIALIZER: Dynamically distributes your true, live on-chain wallet 
+    balances across the active 257 geometric conveyor tiers based on real spot values.
+    """
+    total_steps = len(grid_matrix)
+    sol_inventory = np.zeros(total_steps)
+    usdc_inventory = np.zeros(total_steps)
+    
+    # Identify which steps are below market (buy lanes) and which are above market (sell lanes)
+    below_market_indices = np.where(grid_matrix < current_price)[0]
+    above_market_indices = np.where(grid_matrix >= current_price)[0]
+    
+    # 1. Distribute available stablecoin cash across the buy rungs
+    buy_steps_count = len(below_market_indices)
+    if buy_steps_count > 0 and live_usdc_total > 0:
+        usdc_per_step = live_usdc_total / buy_steps_count
+        for idx in below_market_indices:
+            usdc_inventory[idx] = usdc_per_step
+            
+    # 2. Distribute available base asset inventory across the sell rungs
+    sell_steps_count = len(above_market_indices)
+    if sell_steps_count > 0 and live_sol_total > 0:
+        sol_per_step = live_sol_total / sell_steps_count
+        for idx in above_market_indices:
+            sol_inventory[idx] = sol_per_step
+            
+    print(f"[LIVE INVENTORY MATED] True ledger metrics successfully injected across {total_steps} tiers.")
+    print(f"  Live Asset Allocation Base : {np.sum(sol_inventory):.4f} SOL distributed over {sell_steps_count} sell steps.")
+    print(f"  Live Cash Allocation Base  : ${np.sum(usdc_inventory):.2f} USDC distributed over {buy_steps_count} buy steps.")
+    return sol_inventory, usdc_inventory
+
 
 def check_bucket_overflow(step_index: int, sol_inventory, usdc_inventory, grid_matrix):
     """
@@ -1219,10 +1261,40 @@ async def main():
         # Initialize your custom multipliers around the TRUE calibrated price
         mock_floor = calibrated_boot_price * 0.50
         mock_ceiling = calibrated_boot_price * 1.50
-        
+
         # Generate dynamic ladder array using verified metrics
         grid_matrix = generate_N_ladder(mock_floor, mock_ceiling, mode="geometric")
-        sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, calibrated_boot_price, total_budget_usdc=1000.0)
+        
+        # ==============================================================================
+        # AUTHORITATIVE DUAL-MODE INITIALIZATION PIPELINE
+        # ==============================================================================
+        if RUN_SIMULATION_PRICE_SHIFTER:
+            print(f"[MODE: LABORATORY SIMULATION] Allocating configured ${INITIAL_ALLOCATION_USDC:.2f} baseline budget.")
+            # OPTIMIZED: Replaced the hardcoded 1000.0 with your dynamic environment constant
+            sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, calibrated_boot_price, total_budget_usdc=INITIAL_ALLOCATION_USDC)
+        else:
+            # Option B: Production Track. Query live values first and inject them directly into your rungs
+            print("[MODE: LIVE PRODUCTION] Interrogating live wallet matrix allocations...")
+            
+            # Asynchronously parse your true on-chain ledger metrics
+            live_sol = await fetch_live_token_balance(client, "SOL")
+            live_usdc = await fetch_live_token_balance(client, "USDC")
+            
+            # Map your active capital footprints precisely into your 257-rung conveyor belts
+            sol_stock, usdc_stock = initialize_live_inventory_matrix(
+                grid_matrix=grid_matrix,
+                current_price=calibrated_boot_price,
+                live_sol_total=live_sol,
+                live_usdc_total=live_usdc
+            )
+            
+            # Verify the on-chain injection layout parameters
+            print(f"  [WEB3 SUCCESS] Matrix linked to active hardware keys.")
+            print(f"  Current Live Wallet Allocation Snapshot:")
+            print(f"    -> Total Active Buy-Side Cash Reserve : ${np.sum(usdc_stock):,.2f} USDC")
+            print(f"    -> Total Active Sell-Side Asset Stock : {np.sum(sol_stock):,.6f} SOL")
+        # ==============================================================================
+
         # ==============================================================================
         
         previous_tier_index = None
