@@ -17,6 +17,8 @@ from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
 from solana.rpc.async_api import AsyncClient
+from solders.pubkey import Pubkey
+from solana.rpc.core import TokenAccountOpts
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -219,43 +221,48 @@ async def check_wallet_fuel(client: AsyncClient):
 async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> float:
     """
     Programmatically queries the live Solana blockchain ledger via RPC.
-    Derives Associated Token Accounts (ATA) to parse exact real-time SPL token balances.
+    Natively supports System Account SOL and derives Associated Token Accounts for SPL tokens.
     """
     if not wallet_address_str:
         print(f"[ERROR] Cannot fetch {token_ticker}: MY_PUBLIC_WALLET missing from .env.")
         return 0.0
         
-    token_mint_str = TOKEN_MINTS.get(token_ticker)
-    if not token_mint_str:
-        print(f"[ERROR] Ticker mapping configuration missing for target: {token_ticker}")
-        return 0.0
-
     try:
-        # Clean and sanitize configuration strings out of your .env payload
         clean_wallet = str(wallet_address_str).replace('"', '').replace("'", "").strip()
-        clean_mint = str(token_mint_str).replace('"', '').replace("'", "").strip()
-        
         owner_pubkey = Pubkey.from_string(clean_wallet)
+
+        # --- NATIVE SOL DIRECT SHORTCUT LANE (Unified Future-Proofing Core) --------
+        if token_ticker == "SOL":
+            balance_response = await client.get_balance(owner_pubkey)
+            live_sol_balance = balance_response.value / 1_000_000_000
+            print(f"[BALANCE CHECK] Live SOL Balance Confirmed: {live_sol_balance:,.4f} SOL")
+            return live_sol_balance
+        # --------------------------------------------------------------------------
+
+        token_mint_str = TOKEN_MINTS.get(token_ticker)
+        if not token_mint_str:
+            print(f"[ERROR] Ticker mapping configuration missing for target: {token_ticker}")
+            return 0.0
+
+        clean_mint = str(token_mint_str).replace('"', '').replace("'", "").strip()
         mint_pubkey = Pubkey.from_string(clean_mint)
         
-        # Interrogate the live RPC node using the official SPL Token Program filters
-        opts = {"mint": mint_pubkey}
-        response = await client.get_token_accounts_by_owner(owner_pubkey, opts)
+        # Modern v0.36+ SDK layout passing verified TokenAccountOpts to serialize arguments
+        response = await client.get_token_accounts_by_owner(
+            owner_pubkey,
+            TokenAccountOpts(mint=mint_pubkey)
+        )
         
         if not response.value:
-            # If the account doesn't exist on-chain yet, it means the balance is exactly 0
+            # Safe catch: Unfunded sandbox token accounts naturally evaluate to 0.0
             print(f"[BALANCE CHECK] Live {token_ticker} Wallet State: 0.0000 (No Associated Account Found)")
             return 0.0
             
-        # Extract the account public key from the first matched array slot
-        account_data_block = response.value[0]
-        account_pubkey = account_data_block.pubkey
+        account_info = response.value[0]
+        account_pubkey = account_info.pubkey
         
-        # Query the exact token account details to extract high-precision integer balances
         balance_response = await client.get_token_account_balance(account_pubkey)
-        
         if balance_response.value:
-            # Extract the raw floating-point valuation parsed directly by the RPC parser node
             live_balance = float(balance_response.value.ui_amount)
             print(f"[BALANCE CHECK] Live {token_ticker} Balance Confirmed: {live_balance:,.4f} tokens")
             return live_balance
@@ -1168,6 +1175,7 @@ async def main():
         await check_wallet_fuel(client)
         # PHASE 2 WALLET BALANCES INTERROGATION PASS
         print("[WALLET INTERROGATION] Pulling live token balances from blockchain...")
+        real_sol_balance = await fetch_live_token_balance(client, "SOL")
         real_usdc_balance = await fetch_live_token_balance(client, "USDC")
         real_wvtc_balance = await fetch_live_token_balance(client, "wVTC")
         # ==============================================================================
