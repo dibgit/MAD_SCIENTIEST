@@ -1382,32 +1382,23 @@ async def main():
                                         target_price=grid_matrix[step]
                                     )
                                 # ------------------------------------
-                                
+
                                 # NATIVE STEP RE-BALANCING: Each node absorbs its own execution slice
-                                cash_realized = clean_proceeds * fill_percentage
-                                asset_remaining = tokens_to_liquidate * (1.0 - fill_percentage)
-                                
-                                usdc_stock[step] += cash_realized
-                                sol_stock[step] = asset_remaining
+                                usdc_stock[step] += clean_proceeds * fill_percentage
+                                sol_stock[step] = tokens_to_liquidate * (1.0 - fill_percentage)
                                 
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
-                                raw_lamports_sold = int((tokens_to_liquidate * fill_percentage) * 1_000_000_000)
-                                if raw_lamports_sold > 0:
-                                    prepare_onchain_dex_swap(
-                                        wallet_keypair=sandbox_signer_keypair,
-                                        base_mint=TOKEN_MINTS["SOL"],
-                                        quote_mint=TOKEN_MINTS["USDC"],
-                                        amount_in=raw_lamports_sold,
-                                        slide_direction="PARTIAL SOL -> USDC SWAP"
-                                    )
+                                raw_lamports = int((tokens_to_liquidate * fill_percentage) * 1_000_000_000)
+                                if raw_lamports > 0:
+                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["SOL"], TOKEN_MINTS["USDC"], raw_lamports, "SOL -> USDC SWAP")
+                                    
+                                # CRITICAL LAYER: Trigger conveyor evaluations unconditionally on every loop pass
+                                execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
                                 
-                                # If fully converted to cash, check for profit overflow
                                 if sol_stock[step] <= 1e-12:
                                     sol_stock[step] = 0.0
                                     print(f"  [RESOLUTION] Step {step+1} fully converted into Cash (Xn+1).")
-                                    execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
-                                else:
-                                    print(f"  [PARTIAL FILL] Step {step+1} partially sold. Holding remaining: {sol_stock[step]:.6f} SOL.")
+
 
                     else:
                         # Price dropped down to the buy part (DOWNWARD Trend)
@@ -1430,31 +1421,24 @@ async def main():
                                         target_price=grid_matrix[step]
                                     )
                                 # ------------------------------------
-                                
-                                tokens_credited = clean_asset_bought * fill_percentage
-                                cash_remaining = cash_to_deploy * (1.0 - fill_percentage)
+
                                 
                                 # Secure the exact active split metrics directly on the step line
-                                sol_stock[step] += tokens_credited
-                                usdc_stock[step] = cash_remaining
+                                sol_stock[step] += clean_asset_bought * fill_percentage
+                                usdc_stock[step] = cash_to_deploy * (1.0 - fill_percentage)
                                 
                                 # ---- WEB3 TRANSACTION ROUTER HOOK ----
-                                raw_usdc_atoms_spent = int((cash_to_deploy * fill_percentage) * 1_000_000)
-                                if raw_usdc_atoms_spent > 0:
-                                    prepare_onchain_dex_swap(
-                                        wallet_keypair=sandbox_signer_keypair,
-                                        base_mint=TOKEN_MINTS["USDC"],
-                                        quote_mint=TOKEN_MINTS["SOL"],
-                                        amount_in=raw_usdc_atoms_spent,
-                                        slide_direction="PARTIAL USDC -> SOL SWAP"
-                                    )
+                                raw_atoms = int((cash_to_deploy * fill_percentage) * 1_000_000)
+                                if raw_atoms > 0:
+                                    prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["USDC"], TOKEN_MINTS["SOL"], raw_atoms, "USDC -> SOL SWAP")
                                     
+                                # CRITICAL LAYER: Trigger conveyor evaluations unconditionally on every loop pass
+                                execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
+                                
                                 if usdc_stock[step] <= 1e-9:
                                     usdc_stock[step] = 0.0
                                     print(f"  [RESOLUTION] Step {step+1} fully converted to pure Asset state (Yn+1).")
-                                    execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
-                                else:
-                                    print(f"  [PARTIAL FILL] Step {step+1} partially bought. Remaining cash: ${usdc_stock[step]:.2f} USDC.")
+
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
 
                     # INJECT THE NEW LOGGER HERE: Pass all current system states directly to your CSV file
