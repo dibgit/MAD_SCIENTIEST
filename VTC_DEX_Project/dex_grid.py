@@ -1227,7 +1227,7 @@ async def main():
         if not jupiter_api_key:
             print("[CRITICAL] Configuration Error: JUPITER_API_KEY missing from your .env file. Cannot verify boot baseline.")
             return
-            
+
         sol_mint = TOKEN_MINTS["SOL"]
         url = "https://api.jup.ag/price/v3"
         params = {'ids': sol_mint}
