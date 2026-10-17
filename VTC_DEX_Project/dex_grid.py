@@ -511,30 +511,25 @@ def execute_conveyor_bucket_spillover(step_index: int, sol_inventory, usdc_inven
             print(f"[ASSET CEILING VAULTED] Step {step_index+1} reached peak matrix limits. Secured +{excess_asset:.6f} SOL inside long-term vault memory.")
 
 def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
-    """Generates a full bidirectional market cycle wave to test grid functionality."""
+    """
+    Generates a flawless, non-decaying bidirectional market cycle wave.
+    Uses pure sine-wave mathematics to prevent negative value collapse.
+    """
     if not RUN_SIMULATION_PRICE_SHIFTER:
         return real_oracle_price
-        
-    # Calibrate baseline tracking during initial iterations
     if current_tick <= 5:
         return real_oracle_price
         
-    # Phase Shift Logic: Construct a mathematical market wave
-    # Peak pump behavior materializes at tick 35, followed by a downward correction trend
-    if current_tick <= 35:
-        ticks_since_pump = current_tick - 5
-        simulated_pump_factor = 1.0 + (ticks_since_pump * 0.003)
-        simulated_price = real_oracle_price * simulated_pump_factor
-    else:
-        # Downward Correction Phase
-        ticks_since_peak = current_tick - 35
-        peak_factor = 1.0 + (30 * 0.003)  # Maximum price factor reached at tick 35
-        # Draw down the price by 0.005 (0.5%) on every single tick cycle past the peak
-        simulated_dump_factor = peak_factor - (ticks_since_peak * 0.005)
-        simulated_price = real_oracle_price * simulated_dump_factor
-        
+    # Scale a smooth wave cycle that completes a full round-trip every 60 ticks
+    wave_frequency = (current_tick - 5) * (2 * np.pi / 60)
+    # Allow the price to swing smoothly +/- 30% around your oracle baseline anchor
+    # Widening the amplitude to 30% guarantees it aggressively clears multiple tiers
+    wave_amplitude = 0.30
+    simulated_price = real_oracle_price * (1.0 + np.sin(wave_frequency) * wave_amplitude)
+    
     print(f"[SIMULATION SHIFTER] Active Cycle Wave Price Target: ${simulated_price:,.4f}")
     return simulated_price
+
 
 def execute_automated_git_vault(tick_id: int, current_step: int, market_price: float, last_vault_time: float) -> float:
     """
