@@ -139,9 +139,6 @@ TOKEN_MINTS = {
 ORACLE_FEEDS = {
     "SOL/USD": "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
 }
-# The profit multiplier threshold before a single bucket overflows (e.g., 1.20 = 20% growth)
-BUCKET_OVERFLOW_THRESHOLD = 1.20
-
 # ==============================================================================
 # PHASE 2: DYNAMIC CAPITAL & CONVEYOR THRESHOLD ENVIROMENT INPUTS
 # ==============================================================================
@@ -151,11 +148,13 @@ INITIAL_ALLOCATION_USDC = float(os.getenv("INITIAL_ALLOCATION_USDC", default=100
 # Enforce your strict Conveyor Belt accumulation ceiling cap parameter per step line
 CONVEYOR_THRESHOLD_CAP_SOL = float(os.getenv("CONVEYOR_THRESHOLD_CAP_SOL", default=3.0))
 
+# The profit multiplier threshold before a single bucket overflows (e.g., 1.20 = 20% growth)
+BUCKET_OVERFLOW_THRESHOLD = 1.20
 # Dynamically scale the baseline cash working power per step bucket index using your new input variables
 BASE_USDC_PER_BUCKET = INITIAL_ALLOCATION_USDC / NUMBER_OF_LADDER
 
 # SET TO TRUE TO ACTIVATE THE RANDOM CONVEYOR ORDER EXHAUSTION ENGINE
-RUN_SIMULATION_PRICE_SHIFTER = False
+RUN_SIMULATION_PRICE_SHIFTER = True
 
 # Variable tracking to manage random simulated order-book flows
 SIMULATION_STATE = {
@@ -464,37 +463,52 @@ def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total:
     return sol_inventory, usdc_inventory
 
 
-def check_bucket_overflow(step_index: int, sol_inventory, usdc_inventory, grid_matrix):
+def execute_conveyor_bucket_spillover(step_index: int, sol_inventory, usdc_inventory, grid_matrix):
     """
-    Evaluates if a single step bucket's realized capital exceeds the target threshold.
-    If true, the excess profit overflows into the upper adjacent ladder tier.
+    CONVEYOR SPILLOVER ENGINE: Evaluates individual bucket steps against target thresholds.
+    Natively channels excess stablecoin profits and siphons asset surpluses upward across adjacent tiers.
     """
     total_steps = len(grid_matrix)
     
-    # Check if there is a valid upper ladder tier to overflow into
-    if step_index >= total_steps - 1:
-        return
-        
+    # --- LAYER 1: CASH PROFIT OVERFLOW CHECK ---
     current_cash = usdc_inventory[step_index]
     max_allowed_cash = BASE_USDC_PER_BUCKET * BUCKET_OVERFLOW_THRESHOLD
     
     if current_cash > max_allowed_cash:
         excess_profit = current_cash - BASE_USDC_PER_BUCKET
-        upper_step = step_index + 1
         
-        print(f"[BUCKET OVERFLOW DETECTED] Step {step_index+1} breached limit (${current_cash:.4f} > ${max_allowed_cash:.4f})")
+        if step_index < total_steps - 1:
+            upper_step = step_index + 1
+            usdc_inventory[step_index] = BASE_USDC_PER_BUCKET
+            upper_tier_price = grid_matrix[upper_step]
+            asset_addition = excess_profit / upper_tier_price
+            sol_inventory[upper_step] += asset_addition
+            print(f"  [CASH OVERFLOW] Step {step_index+1} breached limit. Shifted ${excess_profit:.4f} USDC profit into Step {upper_step+1} as {asset_addition:.4f} SOL.")
+        else:
+            # Absolute ceiling boundary: siphon cash straight to the vault permanent storage
+            usdc_inventory[step_index] = BASE_USDC_PER_BUCKET
+            OVERFLOW_VAULT["USDC_DUST"] += excess_profit
+            print(f"  [CASH CEILING VAULTED] Step {step_index+1} at maximum peak. Siphoned ${excess_profit:.4f} USDC straight to the vault locker.")
+
+    # --- LAYER 2: ASSET CONVEYOR SURPLUS CHECK (THE NEW SPILLOVER THRESHOLD ENGINE) ---
+    current_asset = sol_inventory[step_index]
+    
+    if current_asset > CONVEYOR_THRESHOLD_CAP_SOL:
+        excess_asset = current_asset - CONVEYOR_THRESHOLD_CAP_SOL
         
-        # Reset the current bucket back to its baseline working cash
-        usdc_inventory[step_index] = BASE_USDC_PER_BUCKET
-        
-        # Cascade the excess value to the upper ladder step
-        # Convert the profit into asset allocation based on the target upper step price line
-        upper_tier_price = grid_matrix[upper_step]
-        asset_addition = excess_profit / upper_tier_price
-        
-        sol_inventory[upper_step] += asset_addition
-        
-        print(f"  Action: Shifted ${excess_profit:.4f} USDC profit into Step {upper_step+1} as {asset_addition:.4f} SOL")
+        if step_index < total_steps - 1:
+            upper_step = step_index + 1
+            # Lock the active tier line to exactly your configured capacity limit
+            sol_inventory[step_index] = CONVEYOR_THRESHOLD_CAP_SOL
+            # Siphon the surplus token inventory up to the adjacent higher conveyor bucket
+            sol_inventory[upper_step] += excess_asset
+            print(f"[CONVEYOR SPILLOVER] Step {step_index+1} breached cap ({current_asset:.4f} > {CONVEYOR_THRESHOLD_CAP_SOL:.2f} SOL).")
+            print(f"Action: Siphoned excess +{excess_asset:.6f} SOL upward into Step {upper_step+1} inventory tracker.")
+        else:
+            # Absolute ceiling boundary: token surplus rolls cleanly into your permanent macro vault storage
+            sol_inventory[step_index] = CONVEYOR_THRESHOLD_CAP_SOL
+            OVERFLOW_VAULT["SOL_DUST"] += excess_asset
+            print(f"[ASSET CEILING VAULTED] Step {step_index+1} reached peak matrix limits. Secured +{excess_asset:.6f} SOL inside long-term vault memory.")
 
 def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
     """Generates a full bidirectional market cycle wave to test grid functionality."""
@@ -1391,7 +1405,7 @@ async def main():
                                 if sol_stock[step] <= 1e-12:
                                     sol_stock[step] = 0.0
                                     print(f"  [RESOLUTION] Step {step+1} fully converted into Cash (Xn+1).")
-                                    check_bucket_overflow(step, sol_stock, usdc_stock, grid_matrix)
+                                    execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
                                 else:
                                     print(f"  [PARTIAL FILL] Step {step+1} partially sold. Holding remaining: {sol_stock[step]:.6f} SOL.")
 
@@ -1438,6 +1452,7 @@ async def main():
                                 if usdc_stock[step] <= 1e-9:
                                     usdc_stock[step] = 0.0
                                     print(f"  [RESOLUTION] Step {step+1} fully converted to pure Asset state (Yn+1).")
+                                    execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
                                 else:
                                     print(f"  [PARTIAL FILL] Step {step+1} partially bought. Remaining cash: ${usdc_stock[step]:.2f} USDC.")
                     print(f"  Current Total Portfolio Value: ${np.sum(sol_stock) * live_price + np.sum(usdc_stock):,.2f} USD")
