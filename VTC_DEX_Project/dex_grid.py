@@ -679,6 +679,22 @@ def print_matrix_slice_lane(start_idx: int, end_idx: int, grid_matrix, sol_stock
     print(f"[MATRIX INSPECT] Steps {s_idx+1} to {e_idx+1}: " + " -> ".join(output_segments))
 
 
+def log_ladder_state_isolated(context_trigger: str, current_tier: int, grid_matrix, sol_stock, usdc_stock):
+    """
+    Dumps the full comprehensive grid ladder configuration and dynamic balance array layouts
+    directly into the dedicated, isolated structural log file buffer without outputting to console.
+    """
+    total_steps = len(grid_matrix)
+    ladder_state_logger.info(f"=== [GRID_SNAPSHOT_START] Trigger Context: {context_trigger} ===")
+    ladder_state_logger.info(f"Current Matrix Focus Index Layer: Step #{current_tier + 1}")
+    ladder_state_logger.info(f"{'StepIdx':<9} | {'TargetPrice':<14} | {'Allocated SOL':<16} | {'Allocated USDC':<16}")
+    ladder_state_logger.info("-" * 65)
+    for i in range(total_steps):
+        ladder_state_logger.info(
+        f"Step {i+1:03d}   | {grid_matrix[i]:<14.4f} | {sol_stock[i]:<16.6f} | ${usdc_stock[i]:<15.4f}"
+        )
+    ladder_state_logger.info("=== [GRID_SNAPSHOT_END] ===")
+
 @dataclass
 class ConveyorSimulationState:
     buy_prices: np.ndarray
@@ -1336,7 +1352,8 @@ async def main():
             print(f"    -> Total Active Buy-Side Cash Reserve : ${np.sum(usdc_stock):,.2f} USDC")
             print(f"    -> Total Active Sell-Side Asset Stock : {np.sum(sol_stock):,.6f} SOL")
         # ==============================================================================
-
+        # Log primary starting matrix structure to the isolated rung logs
+        log_ladder_state_isolated("ENGINE_BOOT_INITIALIZATION", 0, grid_matrix, sol_stock, usdc_stock)
         # ==============================================================================
         
         previous_tier_index = None
@@ -1478,7 +1495,15 @@ async def main():
                         sol_stock=sol_stock,
                         usdc_stock=usdc_stock
                     )
-                    
+
+                    # Dump comprehensive N=257 matrix changes into isolated log tracking file target
+                    log_ladder_state_isolated(
+                        context_trigger=f"CROSSING_EVENT_{direction}TICK{loop_counter}",
+                        current_tier=current_tier_index,
+                        grid_matrix=grid_matrix,
+                        sol_stock=sol_stock,
+                        usdc_stock=usdc_stock
+                    )
                     log_transaction_to_csv(
                         loop_id=loop_counter,
                         live_price=live_price,
