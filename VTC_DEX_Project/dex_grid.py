@@ -68,6 +68,11 @@ MAX_LOG_SIZE_BYTES = int(os.getenv("MAX_LOG_SIZE_KB", default=10)) * 1024
 MAX_LOG_BACKUPS = int(os.getenv("MAX_LOG_BACKUPS", default=10))
 LOG_FILE_BASE_PATH = os.path.join(DATA_DIR, "messages.log")
 
+# DEDICATED EXTRACTED CONFIGURATION FOR THE ISOLATED RUNG LOGS (Default: 1000KB, 100 backups)
+MAX_BUY_SELL_RUNG_LOG_SIZE_BYTES = int(os.getenv("MAX_BUY_SELL_RUNG_LOG_SIZE_KB", default=1000)) * 1024
+MAX_BUY_SELL_RUNG_LOG_BACKUPS = int(os.getenv("MAX__BUY_SELL_RUNG_LOG_BACKUPS", default=100))
+BUY_SELL_RUNG_LOG_BASE_PATH = os.path.join(DATA_DIR, "buy_sell_rung.log")
+
 # Custom stream interceptor routing log logic to console & file buffers simultaneously
 class MasterStreamLogger:
     def __init__(self, original_stream, file_logger):
@@ -89,23 +94,27 @@ class MasterStreamLogger:
 
 # Define structural layout definitions for rotating handlers
 class SequentialLogNamer(RotatingFileHandler):
-    """Custom file naming strategy handler to enforce sequential index suffixes: messages0.log, messages1.log..."""
+    """Custom file naming strategy handler to enforce sequential index suffixes: base0.log, base1.log..."""
     def do_rollover(self):
         if self.stream:
             self.stream.close()
             self.stream = None
             
+        # Dynamically determine file name segments based on base path configuration
+        dir_name, base_name = os.path.split(self.baseFilename)
+        name_part, ext_part = os.path.splitext(base_name)
+            
         # Execute downset shifting logic across historic logs sequentially up to limit boundaries
         for i in range(self.backupCount - 1, -1, -1):
-            sfn = os.path.join(DATA_DIR, f"messages{i}.log" if i > 0 else "messages.log")
-            dfn = os.path.join(DATA_DIR, f"messages{i+1}.log")
+            sfn = os.path.join(dir_name, f"{name_part}{i}{ext_part}" if i > 0 else base_name)
+            dfn = os.path.join(dir_name, f"{name_part}{i+1}{ext_part}")
             if os.path.exists(sfn):
                 if os.path.exists(dfn):
                     os.remove(dfn)
                 os.rename(sfn, dfn)
                 
         # Re-initialize clean working target log parameters
-        dfn = os.path.join(DATA_DIR, "messages1.log")
+        dfn = os.path.join(dir_name, f"{name_part}1{ext_part}")
         if os.path.exists(self.baseFilename):
             if os.path.exists(dfn):
                 os.remove(dfn)
@@ -114,7 +123,7 @@ class SequentialLogNamer(RotatingFileHandler):
         if not self.delay:
             self.stream = self._open()
 
-# Instantiate the custom logging sub-routines
+# Instantiate the custom primary logging sub-routines
 file_handler = SequentialLogNamer(LOG_FILE_BASE_PATH, maxBytes=MAX_LOG_SIZE_BYTES, backupCount=MAX_LOG_BACKUPS)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 
@@ -124,6 +133,30 @@ internal_logger.addHandler(file_handler)
 
 # Overwrite native standard output vectors to trap standard prints
 sys.stdout = MasterStreamLogger(sys.stdout, internal_logger)
+
+# ==============================================================================
+# ISOLATED LADDER STATE LOG ENGINE INITIALIZATION
+# ==============================================================================
+def setup_ladder_state_logger():
+    """Instantiates a dedicated, isolated rotating file buffer exclusively for transaction events and ladder matrix states."""
+    ladder_logger = logging.getLogger("LadderStateLogger")
+    ladder_logger.setLevel(logging.INFO)
+    ladder_logger.propagate = False  # Strict insulation: Stops this data from leaking into console stdout or primary logs
+    
+    # Wrap with our sequential rolling logic using custom configured size and backup thresholds
+    handler = SequentialLogNamer(
+        BUY_SELL_RUNG_LOG_BASE_PATH, 
+        maxBytes=MAX_BUY_SELL_RUNG_LOG_SIZE_BYTES, 
+        backupCount=MAX_BUY_SELL_RUNG_LOG_BACKUPS
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    
+    ladder_logger.addHandler(handler)
+    return ladder_logger
+
+# Dedicated tracking logger for structural output mapping targets
+ladder_state_logger = setup_ladder_state_logger()
+
 
 # Universal Token Mint Repository Map
 TOKEN_MINTS = {
