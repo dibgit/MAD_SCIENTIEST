@@ -619,6 +619,8 @@ def execute_conveyor_bucket_spillover(step_index: int, sol_inventory, usdc_inven
     CONVEYOR SPILLOVER ENGINE: Evaluates individual bucket steps against target thresholds.
     Natively channels excess stablecoin profits and siphons asset surpluses upward across adjacent tiers.
     """
+    global OVERFLOW_VAULT
+
     total_steps = len(grid_matrix)
     
     # --- LAYER 1: CASH PROFIT OVERFLOW CHECK ---
@@ -1658,7 +1660,9 @@ async def main():
                                     prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["SOL"], TOKEN_MINTS["USDC"], raw_lamports, "SOL -> USDC SWAP")
                                     
                                 # CRITICAL LAYER: Trigger conveyor evaluations unconditionally on every loop pass
-                                execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
+                                #execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
+                                for i in range(len(grid_matrix)):
+                                    execute_conveyor_bucket_spillover(i, sol_stock, usdc_stock, grid_matrix)
                                 
                                 if sol_stock[step] <= 1e-12:
                                     sol_stock[step] = 0.0
@@ -1701,7 +1705,9 @@ async def main():
                                     prepare_onchain_dex_swap(sandbox_signer_keypair, TOKEN_MINTS["USDC"], TOKEN_MINTS["SOL"], raw_atoms, "USDC -> SOL SWAP")
                                     
                                 # CRITICAL LAYER: Trigger conveyor evaluations unconditionally on every loop pass
-                                execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
+                                # execute_conveyor_bucket_spillover(step, sol_stock, usdc_stock, grid_matrix)
+                                for i in range(len(grid_matrix)):
+                                    execute_conveyor_bucket_spillover(i, sol_stock, usdc_stock, grid_matrix)
                                 
                                 if usdc_stock[step] <= 1e-9:
                                     usdc_stock[step] = 0.0
