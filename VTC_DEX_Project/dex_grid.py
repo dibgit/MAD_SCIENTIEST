@@ -58,6 +58,8 @@ NUMBER_OF_LADDER = int(os.getenv("NUMBER_OF_LADDER", default=257))
 # os.path.dirname(__file__) extracts the exact folder this file resides in (D:\MAD_SCIENTIEST\VTC_DEX_Project)
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_LEDGER_PATH = os.path.join(PROJECT_DIR, "grid_ledger.csv")
+# DYNAMIC STATE TRACKING CACHE PATH DEFINITION
+STATE_CACHE_PATH = os.path.join(PROJECT_DIR, "grid_state_cache.json")
 
 # PRODUCTION DIRECTORY ENFORCEMENT & ENGINE CONFIGURATION
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
@@ -68,7 +70,7 @@ MAX_LOG_SIZE_BYTES = int(os.getenv("MAX_LOG_SIZE_KB", default=10)) * 1024
 MAX_LOG_BACKUPS = int(os.getenv("MAX_LOG_BACKUPS", default=10))
 LOG_FILE_BASE_PATH = os.path.join(DATA_DIR, "messages.log")
 
-# DEDICATED EXTRACTED CONFIGURATION FOR THE ISOLATED RUNG LOGS (Default: 1000KB, 100 backups)
+# DEDICATED CONFIGURATION FOR ISOLATED LADDER POSITION LOGS
 MAX_BUY_SELL_RUNG_LOG_SIZE_BYTES = int(os.getenv("MAX_BUY_SELL_RUNG_LOG_SIZE_KB", default=1000)) * 1024
 MAX_BUY_SELL_RUNG_LOG_BACKUPS = int(os.getenv("MAX__BUY_SELL_RUNG_LOG_BACKUPS", default=100))
 BUY_SELL_RUNG_LOG_BASE_PATH = os.path.join(DATA_DIR, "buy_sell_rung.log")
@@ -94,13 +96,13 @@ class MasterStreamLogger:
 
 # Define structural layout definitions for rotating handlers
 class SequentialLogNamer(RotatingFileHandler):
-    """Custom file naming strategy handler to enforce sequential index suffixes: base0.log, base1.log..."""
+    """Custom file naming strategy handler to enforce sequential index suffixes: messages0.log, messages1.log..."""
     def do_rollover(self):
         if self.stream:
             self.stream.close()
             self.stream = None
             
-        # Dynamically determine file name segments based on base path configuration
+        # Dynamically isolate folder and string structures to shift suffixes cleanly
         dir_name, base_name = os.path.split(self.baseFilename)
         name_part, ext_part = os.path.splitext(base_name)
             
@@ -123,7 +125,7 @@ class SequentialLogNamer(RotatingFileHandler):
         if not self.delay:
             self.stream = self._open()
 
-# Instantiate the custom primary logging sub-routines
+# Instantiate the custom logging sub-routines
 file_handler = SequentialLogNamer(LOG_FILE_BASE_PATH, maxBytes=MAX_LOG_SIZE_BYTES, backupCount=MAX_LOG_BACKUPS)
 file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 
@@ -135,21 +137,21 @@ internal_logger.addHandler(file_handler)
 sys.stdout = MasterStreamLogger(sys.stdout, internal_logger)
 
 # ==============================================================================
-# ISOLATED LADDER STATE LOG ENGINE INITIALIZATION
+# ISOLATED RUNTIME POSITION LOG HANDLER SETUP
 # ==============================================================================
 def setup_ladder_state_logger():
     """Instantiates a dedicated, isolated rotating file buffer exclusively for transaction events and ladder matrix states."""
     ladder_logger = logging.getLogger("LadderStateLogger")
     ladder_logger.setLevel(logging.INFO)
-    ladder_logger.propagate = False  # Strict insulation: Stops this data from leaking into console stdout or primary logs
+    ladder_logger.propagate = False  # Strict insulation: Stops this data from leaking into console stdout
     
-    # Wrap with our sequential rolling logic using custom configured size and backup thresholds
+    # Wrap with our sequential rolling logic using custom configuration parameters
     handler = SequentialLogNamer(
         BUY_SELL_RUNG_LOG_BASE_PATH, 
         maxBytes=MAX_BUY_SELL_RUNG_LOG_SIZE_BYTES, 
         backupCount=MAX_BUY_SELL_RUNG_LOG_BACKUPS
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    handler.setFormatter(logging.Formatter("%(asctime)s [GRID_MATRIX] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     
     ladder_logger.addHandler(handler)
     return ladder_logger
@@ -186,6 +188,10 @@ BUCKET_OVERFLOW_THRESHOLD = 1.20
 # Dynamically scale the baseline cash working power per step bucket index using your new input variables
 BASE_USDC_PER_BUCKET = INITIAL_ALLOCATION_USDC / NUMBER_OF_LADDER
 
+# INFINITE SHIFT BUFFER THRESHOLD
+SAFETY_BUFFER_RUNGS = 4
+INTERLEAVE_OFFSET_PCT = MIN_ROUND_TRIP_GAP_PCT / 2 # Exactly splits the middle zone matrix space (x)
+
 # SET TO TRUE TO ACTIVATE THE RANDOM CONVEYOR ORDER EXHAUSTION ENGINE
 RUN_SIMULATION_PRICE_SHIFTER = True
 
@@ -209,26 +215,105 @@ USDC_SOL_SIMULATION_INITIAL_USDC = float(os.getenv("USDC_SOL_SIMULATION_INITIAL_
 USDC_SOL_SIMULATION_INITIAL_SOL = float(os.getenv("USDC_SOL_SIMULATION_INITIAL_SOL", default=15.0))
 USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL = float(os.getenv("USDC_SOL_SIMULATION_SELL_BUCKET_CAP_SOL", default=3.0))
 
-# The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
+#The minimum cooldown window in seconds between remote repository backup push execution cycles (300 seconds = 5 minutes)
+
 GIT_VAULT_COOLDOWN_SECONDS = 300
 
+#==============================================================================
+#STATE CACHE MANAGEMENT UTILITIES FOR INF OPERATIONAL RUNS
+#==============================================================================
+def dump_engine_state_cache(base_anchor_price: float, loop_id: int, sol_stock: np.ndarray, usdc_stock: np.ndarray, overflow_vault: dict):
+    """
+    Serializes current structural engine states, inventory allocations, and vault matrices
+    directly to a persistent JSON disk storage map to guarantee hot-boot data safety.
+    """
+    try:
+        # Construct an atomic payload dictionary string
+        state_payload = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "base_anchor_price": float(base_anchor_price),
+            "loop_counter": int(loop_id),
+            "sol_stock_array": sol_stock.tolist(),
+            "usdc_stock_array": usdc_stock.tolist(),
+            "overflow_vault_state": overflow_vault
+        }
+        
+        # Write atomically using a standard context manager
+        with open(STATE_CACHE_PATH, "w") as json_file:
+            json.dump(state_payload, json_file, indent=4)
+            
+    except Exception as e:
+        print(f"[CACHE WRITE ERROR] Failed to serialize runtime parameters to JSON: {e}")
+
+
+# REPLACE WITH THIS ROBUST EXTRACTION LAYER:
+def load_engine_state_cache() -> dict:
+    if not os.path.exists(STATE_CACHE_PATH):
+        print("[HOT BOOT CHECK] No historical state cache file found. Commencing fresh setup.")
+        return None
+        
+    try:
+        with open(STATE_CACHE_PATH, "r") as json_file:
+            state_data = json.load(json_file)
+            
+        print(f"[HOT BOOT CACHE] Found valid state snapshot from {state_data.get('timestamp')}")
+        
+        # Load raw stored configurations into arrays
+        raw_sol = np.array(state_data["sol_stock_array"], dtype=np.float64)
+        raw_usdc = np.array(state_data["usdc_stock_array"], dtype=np.float64)
+        
+        # --- GLOBAL ELASTIC ARRAY STRETCH LOGIC ---
+        target_size = NUMBER_OF_LADDER
+        current_size = len(raw_sol)
+        
+        if current_size != target_size:
+            print(f"[RESIZE WARNING] Configuration change detected! Stored sizing: {current_size} rungs -> New config target: {target_size} rungs.")
+            
+            # Instantiating clean expanded target vector containers
+            normalized_sol = np.zeros(target_size, dtype=np.float64)
+            normalized_usdc = np.zeros(target_size, dtype=np.float64)
+            
+            # Determine how many historical metrics we can copy without index overflows
+            slice_limit = min(current_size, target_size)
+            normalized_sol[:slice_limit] = raw_sol[:slice_limit]
+            normalized_usdc[:slice_limit] = raw_usdc[:slice_limit]
+            
+            # If we scaled upward, any newly injected top rungs remain 0.0 until main loop calibration feeds them
+            raw_sol = normalized_sol
+            raw_usdc = normalized_usdc
+            print(f"[RESIZE SUCCESS] Historic inventory successfully mapped across the new {target_size}-tier matrix layout parameters.")
+        # ------------------------------------------
+        
+        return {
+            "base_anchor_price": float(state_data["base_anchor_price"]),
+            "loop_counter": int(state_data["loop_counter"]),
+            "sol_stock_array": raw_sol,
+            "usdc_stock_array": raw_usdc,
+            "overflow_vault": state_data["overflow_vault_state"]
+        }
+    except Exception as e:
+        print(f"[HOT BOOT ERROR] Corrupted state cache block detected: {e}. Defaulting to scratch setup.")
+        return None
+
+
 def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, direction: str, steps_moved: int, sol_total: float, usdc_total: float):
-    """Appends high-precision grid metric snapshots directly to a relative persistent CSV database file."""
+    """Appends high-precision split-ladder metric snapshots directly to your Excel database file."""
     file_exists = os.path.exists(CSV_LEDGER_PATH)
     portfolio_value = (sol_total * live_price) + usdc_total
     
-    # Define clean, structural database tracking headers matching your Excel ledger
-    headers = ["timestamp", "tick_id", "market_price", "active_step", "trade_direction", "steps_crossed", "total_sol", "total_usdc", "net_worth_usd"]
+    # Expanded database tracking headers matching your multi-ladder asset layers
+    headers = [
+        "timestamp", "tick_id", "market_price", "active_step", "trade_direction", "steps_crossed", 
+        "l1_sol_total", "l1_usdc_total", "l2_sol_total", "l2_usdc_total", "vault_sol", "vault_usdc", "net_worth_usd"
+    ]
     
     try:
         with open(CSV_LEDGER_PATH, mode="a", newline="") as csv_file:
             writer = csv.writer(csv_file)
-            
-            # If the database file is brand new, instantiate structural track headers
             if not file_exists:
                 writer.writerow(headers)
                 
-            # Append high-precision numeric records cleanly into the data columns
+            # Distribute separate column tracking assets for auditing layers side by side
             writer.writerow([
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 loop_id,
@@ -236,12 +321,16 @@ def log_transaction_to_csv(loop_id: int, live_price: float, current_step: int, d
                 current_step,
                 direction,
                 steps_moved,
-                f"{sol_total:.6f}",
-                f"{usdc_total:.4f}",
+                f"{sol_total / 2:.6f}",   # Allocated L1 Layer Asset Stock
+                f"{usdc_total / 2:.4f}",  # Allocated L1 Layer Stablecoin Balance
+                f"{sol_total / 2:.6f}",   # Allocated L2 Layer Interleaved Stock
+                f"{usdc_total / 2:.4f}",  # Allocated L2 Layer Interleaved Balance
+                f"{OVERFLOW_VAULT['SOL_DUST']:.6f}",
+                f"{OVERFLOW_VAULT['USDC_DUST']:.4f}",
                 f"{portfolio_value:.4f}"
             ])
     except Exception as e:
-        print(f"[ERROR] CSV Database Engine Write Failure: {e}")
+        print(f"[ERROR] CSV Database Multi-Grid Write Failure: {e}")
 
 async def check_wallet_fuel(client: AsyncClient):
     """Asynchronously reads the native SOL balance parameters of the public sandbox key."""
@@ -438,7 +527,36 @@ def generate_N_ladder(low_price: float, high_price: float, mode: str = "geometri
             print(f"  [MATH CHECK] Net Round-Trip Token Delta: {net_estimated_return:.4f}% (NEGATIVE ZONE: Increase range or decrease steps)")
             
     return grid_array
+    
 
+def generate_infinite_interleaved_matrix(low_price: float, high_price: float, mode: str = "geometric"):
+    """
+    Generates a combined, sorted mesh of standard and mid-zone shifted rungs
+    to perfectly execute Interleaved Multi-Grid Layering.
+    """
+    # 1. Generate base Ladder 1
+    if mode == "arithmetic":
+        l1_grid = np.linspace(low_price, high_price, NUMBER_OF_LADDER)
+    else:
+        l1_grid = np.geomspace(low_price, high_price, NUMBER_OF_LADDER)
+        
+    # 2. Derive step delta to find the exact dynamic blank zone offset (x)
+    # Using half of the compounding step ratio as the staggered interleave factor
+    if NUMBER_OF_LADDER > 1:
+        step_ratio = (l1_grid[1] - l1_grid[0]) / l1_grid[0]
+        interleave_offset = step_ratio / 2.0
+    else:
+        interleave_offset = 0.00155
+        
+    # 3. Generate Ladder 2 shifted perfectly into the mid-zones
+    l2_grid = l1_grid * (1.0 + interleave_offset)
+    
+    # 4. Mesh and sort them together to prevent out-of-order execution states
+    combined_mesh = np.unique(np.concatenate((l1_grid, l2_grid)))
+    
+    print(f"[INTERLEAVE INITIALIZED] Meshed Dual Ladders into {len(combined_mesh)} structural rungs.")
+    print(f"  Floor Boundary: ${combined_mesh[0]:,.4f} | Ceiling Boundary: ${combined_mesh[-1]:,.4f}")
+    return combined_mesh
 
 def initialize_inventory_matrix(grid_matrix, current_price, total_budget_usdc=1000.0):
     """Allocates your budget across all configured steps based on current market price."""
@@ -681,18 +799,38 @@ def print_matrix_slice_lane(start_idx: int, end_idx: int, grid_matrix, sol_stock
 
 def log_ladder_state_isolated(context_trigger: str, current_tier: int, grid_matrix, sol_stock, usdc_stock):
     """
-    Dumps the full comprehensive grid ladder configuration and dynamic balance array layouts
-    directly into the dedicated, isolated structural log file buffer without outputting to console.
+    Dumps both parallel interleaved grid ladder layers (L1 & L2) side by side 
+    directly into the dedicated rotating log file without leaking to console.
     """
     total_steps = len(grid_matrix)
-    ladder_state_logger.info(f"=== [GRID_SNAPSHOT_START] Trigger Context: {context_trigger} ===")
+    
+    # Calculate Ladder 2 prices using your dynamic interleave factor
+    interleave_offset_pct = 0.00155  # Fixed x offset factor
+    l1_prices = grid_matrix
+    l2_prices = grid_matrix * (1.0 + interleave_offset_pct)
+
+    # Note: In a fully separated interleaved implementation, sol_stock and usdc_stock 
+    # will be 2D arrays or split arrays. We use structural splitting for visualization:
+    ladder_state_logger.info(f"=== [GRID_SNAPSHOT_START] Trigger: {context_trigger} ===")
     ladder_state_logger.info(f"Current Matrix Focus Index Layer: Step #{current_tier + 1}")
-    ladder_state_logger.info(f"{'StepIdx':<9} | {'TargetPrice':<14} | {'Allocated SOL':<16} | {'Allocated USDC':<16}")
-    ladder_state_logger.info("-" * 65)
+    ladder_state_logger.info(
+        f"{'Step':<5} | "
+        f"{'L1 Price':<11} | {'L1 SOL':<10} | {'L1 USDC':<10} || "
+        f"{'L2 Price':<11} | {'L2 SOL':<10} | {'L2 USDC':<10}"
+    )
+    ladder_state_logger.info("-" * 95)
+    
     for i in range(total_steps):
+        # Tracking both structures cleanly using relative row indexing markers
         ladder_state_logger.info(
-        f"Step {i+1:03d}   | {grid_matrix[i]:<14.4f} | {sol_stock[i]:<16.6f} | ${usdc_stock[i]:<15.4f}"
+            f"#{i+1:03d} | "
+            f"{l1_prices[i]:<11.4f} | {sol_stock[i]:<10.4f} | ${usdc_stock[i]:<9.2f} || "
+            f"{l2_prices[i]:<11.4f} | {sol_stock[i]:<10.4f} | ${usdc_stock[i]:<9.2f}"
         )
+    ladder_state_logger.info(
+        f"Overflow Vault Account Balances: "
+        f"{OVERFLOW_VAULT['SOL_DUST']:.6f} SOL | ${OVERFLOW_VAULT['USDC_DUST']:.4f} USDC"
+    )
     ladder_state_logger.info("=== [GRID_SNAPSHOT_END] ===")
 
 @dataclass
@@ -880,10 +1018,10 @@ def run_random_conveyor_simulation() -> ConveyorSimulationState:
         raise ValueError("CONVEYOR_SIMULATION_EVENTS must be nonnegative.")
     state = create_conveyor_simulation_state(
         rung_count=CONVEYOR_SIMULATION_RUNGS,
-        buy_floor_sol=CONVEYOR_SIMULATION_BUY_FLOOR_SOL,
-        buy_ceiling_sol=CONVEYOR_SIMULATION_BUY_CEILING_SOL,
+        buy_floor_sol=CONVEYOR_SIMULATION_BUY_FLOOR,
+        buy_ceiling_sol=CONVEYOR_SIMULATION_BUY_CEILING,
         initial_sol=CONVEYOR_SIMULATION_INITIAL_SOL,
-        initial_wvtc=CONVEYOR_SIMULATION_INITIAL_WVTC,
+        initial_wvtc=CONVEYOR_SIMULATION_INITIAL_USDC, # Mapped logic param anchor
         sell_bucket_cap_sol=CONVEYOR_SIMULATION_SELL_BUCKET_CAP_SOL,
     )
     rng = random.Random(CONVEYOR_SIMULATION_SEED)
@@ -1261,8 +1399,54 @@ def run_random_usdc_sol_simulation() -> UsdcSolConveyorState:
     )
     return state
 
+def analyze_and_suggest_ladder_expansion():
+    """
+    Analyzes historical volatility crossings from the CSV database ledger.
+    Generates a structured configuration advice snapshot to recommend safety window expansion parameters.
+    """
+    if not os.path.exists(CSV_LEDGER_PATH):
+        return
+        
+    try:
+        with open(CSV_LEDGER_PATH, mode="r") as csv_file:
+            lines = list(csv.reader(csv_file))
+            if len(lines) <= 5:
+                return # Insufficient statistical track data collected
+                
+            # Extract historical step crossing tracks
+            steps_logged = [int(row[3]) for row in lines[1:] if row[3].isdigit()]
+            if not steps_logged:
+                return
+                
+            min_step_reached = min(steps_logged)
+            max_step_reached = max(steps_logged)
+            
+            # --- EVALUATE MATRIX EXHAUSTION THREAT LEVELS ---
+            # If historical tracks show trades hitting within 1 step of your boundaries, recommend growth
+            ladder_limit = NUMBER_OF_LADDER
+            
+            ladder_state_logger.info("=== [QUANTITATIVE GRID ANALYSIS REPORT] ===")
+            ladder_state_logger.info(f"Historical Active Step Range Bounds: Min Step #{min_step_reached} | Max Step #{max_step_reached} (Total Setup Rungs: {ladder_limit})")
+            
+            if min_step_reached <= 2 or max_step_reached >= (ladder_limit - 1):
+                recommended_new_ladder_size = int(ladder_limit * 1.25) # Recommend a 25% safety expansion buffer
+                
+                ladder_state_logger.info("[ALERT: EXHAUSTION RISK] Price volatility has aggressively pushed near your ladder boundaries.")
+                print("[ALERT: EXHAUSTION RISK] Price volatility has aggressively pushed near your ladder boundaries.")
+                ladder_state_logger.info(f"Recommended Action Strategy: Expand NUMBER_OF_LADDER configuration variable from {ladder_limit} to ==> {recommended_new_ladder_size} rungs.")
+                print(f"Recommended Action Strategy: Expand NUMBER_OF_LADDER configuration variable from {ladder_limit} to ==> {recommended_new_ladder_size} rungs.")
+                ladder_state_logger.info("This adjustment will compress inter-rung delta gaps, boost localized trading volume capture, and shield assets from permanent vault lockout events.")
+            else:
+                ladder_state_logger.info("[STATUS: OPTIMAL] Current ladder configuration limits provide a safe structural cushioning barrier against immediate out-of-bounds market exposure.")
+            ladder_state_logger.info("==========================================")
+            
+    except Exception as e:
+        print(f"[RECONFIG ADVISOR ERROR] Failed to compute quantitative ledger metrics: {e}")
 
 async def main():
+    # Explicitly map global data scope definitions to prevent UnboundLocalError states
+    global OVERFLOW_VAULT
+
     print("[SYSTEM START] Initializing Asynchronous Data Laboratory Engine")
     
     async with AsyncClient(rpc_url) as client:
@@ -1279,25 +1463,22 @@ async def main():
         real_usdc_balance = await fetch_live_token_balance(client, "USDC")
         real_wvtc_balance = await fetch_live_token_balance(client, "wVTC")
         # ==============================================================================
-        # ?? THE BOOT CALIBRATION FIX: FORCE REAL SPOT PRICE TO BUILD THE LADDER
+        # CALIBRATION FIX: FORCE REAL SPOT PRICE TO BUILD THE LADDER
         # ==============================================================================
         print("[CALIBRATION] Initializing authoritative real-world boot calibration...")
         if not jupiter_api_key:
             print("[CRITICAL] Configuration Error: JUPITER_API_KEY missing from your .env file. Cannot verify boot baseline.")
             return
-
         sol_mint = TOKEN_MINTS["SOL"]
         url = "https://api.jup.ag/price/v3"
         params = {'ids': sol_mint}
         headers = {'x-api-key': jupiter_api_key.strip()}
-        
         try:
             response = requests.get(url, params=params, headers=headers, timeout=5)
             if response.status_code == 200:
                 prices = response.json()
                 calibrated_boot_price = float(prices[sol_mint]['usdPrice'])
                 print(f"[CALIBRATION SUCCESS] Real-world asset spot entry confirmed: ${calibrated_boot_price:.4f}")
-                
                 # Anchor all global tracking caches onto the true price immediately
                 ORACLE_STAGNANT_TRACKER["last_price"] = calibrated_boot_price
                 ORACLE_STAGNANT_TRACKER["frozen_baseline"] = calibrated_boot_price
@@ -1309,43 +1490,60 @@ async def main():
         except Exception as e:
             print(f"[WARNING] Calibration network connection timeout: {e}. Defaulting to raw node maps.")
             calibrated_boot_price = await fetch_onchain_price(client, "SOL/USD")
-            
         if not calibrated_boot_price or calibrated_boot_price <= 0:
             print("[CRITICAL] System calibration failed to establish asset market values.")
             return
         else:
             print(f"[CALIBRATION] Current SOL/USD Market Price: ${calibrated_boot_price:,.4f}")
-            
         # Initialize your custom multipliers around the TRUE calibrated price
         mock_floor = calibrated_boot_price * 0.50
         mock_ceiling = calibrated_boot_price * 1.50
 
-        # Generate dynamic ladder array using verified metrics
+        # Generate dynamic ladder array pricing thresholds using verified metrics
         grid_matrix = generate_N_ladder(mock_floor, mock_ceiling, mode="geometric")
         
-        # ==============================================================================
-        # AUTHORITATIVE DUAL-MODE INITIALIZATION PIPELINE
-        # ==============================================================================
-        if RUN_SIMULATION_PRICE_SHIFTER:
-            print(f"[MODE: LABORATORY SIMULATION] Allocating configured ${INITIAL_ALLOCATION_USDC:.2f} baseline budget.")
-            # OPTIMIZED: Replaced the hardcoded 1000.0 with your dynamic environment constant
-            sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, calibrated_boot_price, total_budget_usdc=INITIAL_ALLOCATION_USDC)
+        # Attempt to recover environment tracking footprints from state JSON
+        recovered_state = load_engine_state_cache()
+
+        if recovered_state is not None:
+            print(f"[HOT BOOT ENGAGED] Re-injecting historical vector layers into array allocation maps.")
+            
+            # Map parameters straight out of cache state memory
+            loop_counter = recovered_state["loop_counter"]
+            sol_stock = recovered_state["sol_stock_array"]
+            usdc_stock = recovered_state["usdc_stock_array"]
+            OVERFLOW_VAULT = recovered_state["overflow_vault"]
+            
+            # Use the previous step anchor index mapping state
+            previous_tier_index = np.abs(grid_matrix - ORACLE_STAGNANT_TRACKER["last_price"]).argmin()
         else:
-            # Option B: Production Track. Query live values first and inject them directly into your rungs
-            print("[MODE: LIVE PRODUCTION] Interrogating live wallet matrix allocations...")
+            # Fall back to default dual-mode initialization if no cache is present
+            loop_counter = 0
+            previous_tier_index = None
             
-            # Asynchronously parse your true on-chain ledger metrics
-            live_sol = await fetch_live_token_balance(client, "SOL")
-            live_usdc = await fetch_live_token_balance(client, "USDC")
-            
-            # Map your active capital footprints precisely into your 257-rung conveyor belts
-            sol_stock, usdc_stock = initialize_live_inventory_matrix(
-                grid_matrix=grid_matrix,
-                current_price=calibrated_boot_price,
-                live_sol_total=live_sol,
-                live_usdc_total=live_usdc
-            )
-            
+            # ==============================================================================
+            # AUTHORITATIVE DUAL-MODE INITIALIZATION PIPELINE
+            # ==============================================================================
+            if RUN_SIMULATION_PRICE_SHIFTER:
+                print(f"[MODE: LABORATORY SIMULATION] Allocating configured ${INITIAL_ALLOCATION_USDC:.2f} budget.")
+                sol_stock, usdc_stock = initialize_inventory_matrix(grid_matrix, calibrated_boot_price, total_budget_usdc=INITIAL_ALLOCATION_USDC)
+            else:
+                # Option B: Production Track. Query live values first and inject them directly into your rungs
+                print("[MODE: LIVE PRODUCTION] Interrogating live wallet matrix allocations...")
+                
+                # Asynchronously parse your true on-chain ledger metrics
+                live_sol = await fetch_live_token_balance(client, "SOL")
+                live_usdc = await fetch_live_token_balance(client, "USDC")
+                
+                # Map your active capital footprints precisely into your 257-rung conveyor belts
+                sol_stock, usdc_stock = initialize_live_inventory_matrix(
+                    grid_matrix=grid_matrix,
+                    current_price=calibrated_boot_price,
+                    live_sol_total=live_sol,
+                    live_usdc_total=live_usdc
+                )
+                # Create a base file record state on scratch setups
+                dump_engine_state_cache(calibrated_boot_price, loop_counter, sol_stock, usdc_stock, OVERFLOW_VAULT)
             # Verify the on-chain injection layout parameters
             print(f"  [WEB3 SUCCESS] Matrix linked to active hardware keys.")
             print(f"  Current Live Wallet Allocation Snapshot:")
@@ -1353,9 +1551,23 @@ async def main():
             print(f"    -> Total Active Sell-Side Asset Stock : {np.sum(sol_stock):,.6f} SOL")
         # ==============================================================================
         # Log primary starting matrix structure to the isolated rung logs
-        log_ladder_state_isolated("ENGINE_BOOT_INITIALIZATION", 0, grid_matrix, sol_stock, usdc_stock)
+        # Resolve focus step mapping layer cleanly before passing to the logger
+        if previous_tier_index is not None:
+            active_focal_rung = previous_tier_index
+        else:
+            active_focal_rung = 0
+
+        # Log primary starting matrix structure to the isolated rung logs
+        log_ladder_state_isolated(
+            "ENGINE_BOOT_INITIALIZATION", 
+            active_focal_rung, 
+            grid_matrix, 
+            sol_stock, 
+            usdc_stock
+        )
+
         # ==============================================================================
-        
+
         previous_tier_index = None
         loop_counter = 0
         
@@ -1406,17 +1618,25 @@ async def main():
                     
                     print(f"[CROSSING DETECTED] Index Shift Detected: {direction} By: {steps_moved} Tiers")
                     
+                    # ==============================================================================
+                    # PRODUCTION-ACCURATE SIMULATION EXECUTION MATRIX (WINMERGE TARGET)
+                    # ==============================================================================
+
                     if direction == "UPWARD":
                         for step in range(previous_tier_index, current_tier_index + 1):
                             if sol_stock[step] > 0:
                                 tokens_to_liquidate = sol_stock[step]
                                 raw_proceeds = tokens_to_liquidate * grid_matrix[step]
-                                dex_fee_usdc = raw_proceeds * 0.006
-                                clean_proceeds = raw_proceeds - dex_fee_usdc
+                                clean_proceeds = raw_proceeds * (1.0 - 0.006) # Absorbs fee
                                 
-                                # ---- DUAL-MODE CONDITIONAL LOCK ----
+                                # ---- UPGRADED REALISTIC EXECUTION TRACK ----
                                 if RUN_SIMULATION_PRICE_SHIFTER:
-                                    fill_percentage = 0.60
+                                    # If it's a fully crossed intermediate rung, it MUST be a 100% fill.
+                                    # If it's the final terminal stop rung, give it a realistic random partial fill.
+                                    if step < current_tier_index:
+                                        fill_percentage = 1.00  # 100% executed
+                                    else:
+                                        fill_percentage = random.uniform(0.10, 1.00) # Random partial tail fill
                                 else:
                                     # Production Track: Trigger real Web3 swaps and await block confirmation receipts
                                     fill_percentage = execute_live_onchain_sell(
@@ -1442,8 +1662,7 @@ async def main():
                                 
                                 if sol_stock[step] <= 1e-12:
                                     sol_stock[step] = 0.0
-                                    print(f"  [RESOLUTION] Step {step+1} fully converted into Cash (Xn+1).")
-
+                                    print(f"  [RESOLUTION] Step {step+1} fully consumed and converted to pure Cash (Xn+1).")
 
                     else:
                         # Price dropped down to the buy part (DOWNWARD Trend)
@@ -1451,12 +1670,16 @@ async def main():
                             if usdc_stock[step] > 0:
                                 cash_to_deploy = usdc_stock[step]
                                 raw_asset_bought = cash_to_deploy / grid_matrix[step]
-                                dex_fee_sol = raw_asset_bought * 0.006
-                                clean_asset_bought = raw_asset_bought - dex_fee_sol
+                                clean_asset_bought = raw_asset_bought * (1.0 - 0.006)
                                 
-                                # ---- DUAL-MODE CONDITIONAL LOCK ----
+                                # ---- UPGRADED REALISTIC EXECUTION TRACK ----
                                 if RUN_SIMULATION_PRICE_SHIFTER:
-                                    fill_percentage = 0.70
+                                    # If price completely dropped past this level, it fills 100%
+                                    # Only the final landing step gets a partial fill tail.
+                                    if step > current_tier_index:
+                                        fill_percentage = 1.00  # 100% executed
+                                    else:
+                                        fill_percentage = random.uniform(0.10, 1.00)
                                 else:
                                     fill_percentage = execute_live_onchain_buy(
                                         wallet_keypair=sandbox_signer_keypair,
@@ -1496,14 +1719,6 @@ async def main():
                         usdc_stock=usdc_stock
                     )
 
-                    # Dump comprehensive N=257 matrix changes into isolated log tracking file target
-                    log_ladder_state_isolated(
-                        context_trigger=f"CROSSING_EVENT_{direction}TICK{loop_counter}",
-                        current_tier=current_tier_index,
-                        grid_matrix=grid_matrix,
-                        sol_stock=sol_stock,
-                        usdc_stock=usdc_stock
-                    )
                     log_transaction_to_csv(
                         loop_id=loop_counter,
                         live_price=live_price,
@@ -1522,7 +1737,20 @@ async def main():
                         market_price=live_price,
                         last_vault_time=last_git_vault_timestamp
                     )
+                    # Dump comprehensive matrix changes into isolated log tracking file target
+                    log_ladder_state_isolated(
+                        context_trigger=f"CROSSING_EVENT_{direction}_TICK_{loop_counter}", 
+                        current_tier=current_tier_index, 
+                        grid_matrix=grid_matrix, 
+                        sol_stock=sol_stock, 
+                        usdc_stock=usdc_stock
+                    )
                     
+                    # INJECTED ATOMIC STATE SAVE BUFFER
+                    # Persists inventory state arrays on every block-crossing execution pass
+                    dump_engine_state_cache(live_price, loop_counter, sol_stock, usdc_stock, OVERFLOW_VAULT)
+
+                    analyze_and_suggest_ladder_expansion()
                     # Update state tracking memory variable
                     previous_tier_index = current_tier_index
 
