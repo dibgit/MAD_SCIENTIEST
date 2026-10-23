@@ -31,24 +31,30 @@ GRID_EXECUTION_MODE = "OPTION_B"
 
 # --- LEGACY OPTION A CONFIGURATION BLOCK ---
 if GRID_EXECUTION_MODE == "OPTION_A":
-    MIN_ROUND_TRIP_GAP_PCT = 0.008
-    DEX_EXECUTION_FEE_RATE = 0.006
-    TARGET_NET_RETURN_PCT = 0.0015
+    MIN_ROUND_TRIP_GAP_PCT = np.float64(0.008)
+    DEX_EXECUTION_FEE_RATE = np.float64(0.006)
+    TARGET_NET_RETURN_PCT = np.float64(0.0015)
 
 # --- AGGRESSIVE OPTION B ARCHITECTURE BLOCK (HIGH VOLATILITY OPTIMIZED) ---
 else:
     # Explicit User Parameters
-    TARGET_NET_RETURN_PCT = 0.0015    # Target +0.15% pure compounding alpha return
-    BUY_COST_FRACTION = 0.006         # 0.6% buy execution friction
-    SELL_COST_FRACTION = 0.006        # 0.6% sell execution friction
+    TARGET_NET_RETURN_PCT = np.float64(0.0015)  # Target +0.15% pure compounding alpha return
+    BUY_COST_FRACTION = np.float64(0.006)       # 0.6% buy execution friction
+    SELL_COST_FRACTION = np.float64(0.006)      # 0.6% sell execution friction
 
     # Authoritative Mathematical Gross Price Ratio Formula:
     # minimum gross ratio = (1 + net_return) / ((1 - buy_cost) * (1 - sell_cost))
-    MINIMUM_GROSS_PRICE_RATIO = (1.0 + TARGET_NET_RETURN_PCT) / ((1.0 - BUY_COST_FRACTION) * (1.0 - SELL_COST_FRACTION))
+    MINIMUM_GROSS_PRICE_RATIO = (
+        (np.float64(1.0) + TARGET_NET_RETURN_PCT)
+        / (
+            (np.float64(1.0) - BUY_COST_FRACTION)
+            * (np.float64(1.0) - SELL_COST_FRACTION)
+        )
+    )
 
     # Derived Round-Trip Spread Delta Gap
     MIN_ROUND_TRIP_GAP_PCT = MINIMUM_GROSS_PRICE_RATIO - 1.0  # Evaluates to exactly ~0.01362703 (1.363%)
-    DEX_EXECUTION_FEE_RATE = 0.006
+    DEX_EXECUTION_FEE_RATE = np.float64(0.006)
 
 # Global Interleaved Offset Factor matching the derived round-trip gap baseline
 # DYNAMIC ENGINE CONFIGURATION EXTRACTION
@@ -59,8 +65,8 @@ if NUMBER_OF_LADDER < 2:
 
 # Keep track of previous prices globally to detect a flatlining feed
 ORACLE_STAGNANT_TRACKER = {
-    "frozen_baseline": 0.0,    # Stores the exact stale price line to watch for wake-ups
-    "last_price": 0.0,         # Stores the active working price matrix anchor
+    "frozen_baseline": np.float64(0.0),  # Stores the stale price line to watch for wake-ups
+    "last_price": np.float64(0.0),       # Stores the active working price matrix anchor
     "flatline_count": 0,       # Sequential tracking tick counter
     "is_stale_mode": False     # Lockout flag: True if we are running in Jupiter Fallback mode
 }
@@ -68,8 +74,8 @@ ORACLE_STAGNANT_TRACKER = {
 # Completely isolates fractional leftovers, dust balances, and transaction fees
 # to keep your core N=257-step matrix from expanding or breaking.
 OVERFLOW_VAULT = {
-    "SOL_DUST": 0.0,
-    "USDC_DUST": 0.0
+    "SOL_DUST": np.float64(0.0),
+    "USDC_DUST": np.float64(0.0)
 }
 
 # Initialize environment configuration pathing
@@ -79,7 +85,7 @@ jupiter_api_key = os.getenv("JUPITER_API_KEY")
 RUN_SIMULATION_PRICE_SHIFTER = os.getenv(
     "RUN_SIMULATION_PRICE_SHIFTER", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
-INITIAL_ALLOCATION_USDC = float(os.getenv("INITIAL_ALLOCATION_USDC", default=1000.0))
+INITIAL_ALLOCATION_USDC = np.float64(os.getenv("INITIAL_ALLOCATION_USDC", default="1000.0"))
 if not np.isfinite(INITIAL_ALLOCATION_USDC) or INITIAL_ALLOCATION_USDC <= 0:
     raise ValueError("INITIAL_ALLOCATION_USDC must be a finite positive amount.")
 INVENTORY_MODE = "SIMULATION" if RUN_SIMULATION_PRICE_SHIFTER else "WALLET"
@@ -210,10 +216,12 @@ ORACLE_FEEDS = {
 # PHASE 2: DYNAMIC CAPITAL & CONVEYOR THRESHOLD ENVIROMENT INPUTS
 # ==============================================================================
 # Enforce your strict Conveyor Belt accumulation ceiling cap parameter per step line
-CONVEYOR_THRESHOLD_CAP_SOL = float(os.getenv("CONVEYOR_THRESHOLD_CAP_SOL", default=3.0))
+CONVEYOR_THRESHOLD_CAP_SOL = np.float64(
+    os.getenv("CONVEYOR_THRESHOLD_CAP_SOL", default="3.0")
+)
 
 # The profit multiplier threshold before a single bucket overflows (e.g., 1.20 = 20% growth)
-BUCKET_OVERFLOW_THRESHOLD = 1.20
+BUCKET_OVERFLOW_THRESHOLD = np.float64(1.20)
 # INFINITE SHIFT BUFFER THRESHOLD
 SAFETY_BUFFER_RUNGS = 4
 
@@ -257,6 +265,7 @@ def load_engine_state_cache(current_price: float) -> dict | None:
     if not os.path.exists(STATE_CACHE_PATH):
         return None
     try:
+        current_price = np.float64(current_price)
         with open(STATE_CACHE_PATH, "r") as json_file:
             state_data = json.load(json_file)
 
@@ -268,7 +277,7 @@ def load_engine_state_cache(current_price: float) -> dict | None:
             )
             return None
 
-        anchor_price = float(state_data["base_anchor_price"])
+        anchor_price = np.float64(state_data["base_anchor_price"])
         if not np.isfinite(anchor_price) or anchor_price <= 0:
             raise ValueError("Cached anchor price must be finite and positive.")
 
@@ -360,21 +369,28 @@ def load_engine_state_cache(current_price: float) -> dict | None:
                 f"to {NUMBER_OF_LADDER} configured rung(s) per ladder."
             )
 
-        cash_baselines = state_data.get("cash_bucket_baselines", (0.0, 0.0))
+        cash_baselines = state_data.get(
+            "cash_bucket_baselines",
+            (np.float64(0.0), np.float64(0.0)),
+        )
         if len(cash_baselines) != 2 or any(
-            not np.isfinite(float(value)) or float(value) < 0
+            not np.isfinite(np.float64(value)) or np.float64(value) < 0
             for value in cash_baselines
         ):
             raise ValueError("Cached cash bucket baselines are invalid.")
         if "cash_bucket_baselines" not in state_data:
             reference_price = current_price if current_price > 0 else anchor_price
             cash_baselines = (
-                float(np.sum(l1_usdc))
+                np.sum(l1_usdc, dtype=np.float64)
                 / max(1, int(np.count_nonzero(new_l1_grid < reference_price))),
-                float(np.sum(l2_usdc))
+                np.sum(l2_usdc, dtype=np.float64)
                 / max(1, int(np.count_nonzero(new_l2_grid < reference_price))),
             )
 
+        cached_vault = state_data.get(
+            "overflow_vault_state",
+            {"SOL_DUST": np.float64(0.0), "USDC_DUST": np.float64(0.0)},
+        )
         return {
             "base_anchor_price": anchor_price,
             "loop_counter": int(state_data["loop_counter"]),
@@ -382,11 +398,13 @@ def load_engine_state_cache(current_price: float) -> dict | None:
             "l1_usdc": l1_usdc,
             "l2_sol": l2_sol,
             "l2_usdc": l2_usdc,
-            "cash_bucket_baselines": tuple(float(value) for value in cash_baselines),
-            "overflow_vault": state_data.get(
-                "overflow_vault_state",
-                {"SOL_DUST": 0.0, "USDC_DUST": 0.0},
+            "cash_bucket_baselines": tuple(
+                np.float64(value) for value in cash_baselines
             ),
+            "overflow_vault": {
+                "SOL_DUST": np.float64(cached_vault.get("SOL_DUST", 0.0)),
+                "USDC_DUST": np.float64(cached_vault.get("USDC_DUST", 0.0)),
+            },
         }
     except Exception as e:
         print(f"[HOT BOOT ERROR] Dual-ladder recovery failure: {e}")
@@ -401,12 +419,13 @@ def log_transaction_to_csv(
     layer_stocks: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
 ):
     """Appends high-precision split-ladder metric snapshots directly to your Excel database file."""
+    live_price = np.float64(live_price)
     file_exists = os.path.exists(CSV_LEDGER_PATH)
     l1_sol, l1_usdc, l2_sol, l2_usdc = layer_stocks
-    l1_sol_total = float(np.sum(l1_sol))
-    l1_usdc_total = float(np.sum(l1_usdc))
-    l2_sol_total = float(np.sum(l2_sol))
-    l2_usdc_total = float(np.sum(l2_usdc))
+    l1_sol_total = np.sum(l1_sol, dtype=np.float64)
+    l1_usdc_total = np.sum(l1_usdc, dtype=np.float64)
+    l2_sol_total = np.sum(l2_sol, dtype=np.float64)
+    l2_usdc_total = np.sum(l2_usdc, dtype=np.float64)
     total_sol = l1_sol_total + l2_sol_total + OVERFLOW_VAULT["SOL_DUST"]
     total_usdc = l1_usdc_total + l2_usdc_total + OVERFLOW_VAULT["USDC_DUST"]
     portfolio_value = (total_sol * live_price) + total_usdc
@@ -457,9 +476,9 @@ async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> fl
         # --- NATIVE SOL DIRECT SHORTCUT LANE (Unified Future-Proofing Core) --------
         if token_ticker == "SOL":
             balance_response = await client.get_balance(owner_pubkey)
-            live_sol_balance = balance_response.value / 1_000_000_000
+            live_sol_balance = np.float64(balance_response.value) / np.float64(1_000_000_000)
             print(f"[BALANCE CHECK] Live SOL Balance Confirmed: {live_sol_balance:,.4f} SOL")
-            return live_sol_balance
+            return np.float64(live_sol_balance)
         # --------------------------------------------------------------------------
 
         token_mint_str = TOKEN_MINTS.get(token_ticker)
@@ -486,7 +505,7 @@ async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> fl
         
         balance_response = await client.get_token_account_balance(account_pubkey)
         if balance_response.value:
-            live_balance = float(balance_response.value.ui_amount)
+            live_balance = np.float64(balance_response.value.ui_amount)
             print(f"[BALANCE CHECK] Live {token_ticker} Balance Confirmed: {live_balance:,.4f} tokens")
             return live_balance
             
@@ -521,7 +540,7 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
         raw_price, confidence, exponent = struct.unpack("<qQi", price_data)
         # Enforce fixed-point decimal scaling rule of 10^8
         # Parse the raw on-chain state value
-        oracle_price = float(raw_price) / 100_000_000.0
+        oracle_price = np.float64(raw_price) / np.float64(100_000_000)
         
         # Initialize the baseline price tracking variable on your very first boot tick
         if ORACLE_STAGNANT_TRACKER["frozen_baseline"] == 0.0:
@@ -569,7 +588,7 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
                     response = requests.get(url, params=params, headers=headers, timeout=5)
                     if response.status_code == 200:
                         prices = response.json()
-                        spot_price = float(prices[sol_mint]['usdPrice'])
+                        spot_price = np.float64(prices[sol_mint]['usdPrice'])
                         
                         print(f"[JUPITER TICK] {pair_ticker} Active Working Value: ${spot_price:.4f}")
                         
@@ -600,17 +619,19 @@ def generate_ladders_for_size(
     mode: str = "geometric",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Builds two same-length ladders with Ladder 2 half a rung above Ladder 1."""
+    low_price = np.float64(low_price)
+    high_price = np.float64(high_price)
     if not (0 < low_price < high_price):
         raise ValueError("Ladder boundaries must be positive and low_price must be below high_price.")
     if rung_count < 2:
         raise ValueError("Interleaved ladders require at least two rungs per ladder.")
 
     if mode == "arithmetic":
-        l1_grid = np.linspace(low_price, high_price, rung_count)
+        l1_grid = np.linspace(low_price, high_price, rung_count, dtype=np.float64)
         step_offset = (l1_grid[1] - l1_grid[0]) / 2.0
         l2_grid = l1_grid + step_offset
     elif mode == "geometric":
-        l1_grid = np.geomspace(low_price, high_price, rung_count)
+        l1_grid = np.geomspace(low_price, high_price, rung_count, dtype=np.float64)
         half_step_ratio = np.sqrt(l1_grid[1] / l1_grid[0])
         l2_grid = l1_grid * half_step_ratio
     else:
@@ -648,10 +669,10 @@ def build_interleaved_event_mesh(
 ) -> tuple[np.ndarray, list[tuple[int, int]]]:
     """Returns sorted prices with each event's source ladder and rung index."""
     events = [
-        (float(price), 0, rung_index)
+        (np.float64(price), 0, rung_index)
         for rung_index, price in enumerate(l1_grid)
     ] + [
-        (float(price), 1, rung_index)
+        (np.float64(price), 1, rung_index)
         for rung_index, price in enumerate(l2_grid)
     ]
     events.sort(key=lambda event: event[0])
@@ -662,11 +683,16 @@ def build_interleaved_event_mesh(
 
 def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
     """Apply the optional smooth price wave for local ladder-accounting tests."""
+    real_oracle_price = np.float64(real_oracle_price)
     if not RUN_SIMULATION_PRICE_SHIFTER or current_tick <= 5:
         return real_oracle_price
 
-    wave_frequency = (current_tick - 5) * (2 * np.pi / 60)
-    simulated_price = real_oracle_price * (1.0 + np.sin(wave_frequency) * 0.30)
+    wave_frequency = np.float64(current_tick - 5) * (
+        np.float64(2.0) * np.pi / np.float64(60.0)
+    )
+    simulated_price = real_oracle_price * (
+        np.float64(1.0) + np.sin(wave_frequency) * np.float64(0.30)
+    )
     print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
     return simulated_price
 
@@ -676,9 +702,12 @@ def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total:
     PRODUCTION INITIALIZER: Dynamically distributes your true, live on-chain wallet 
     balances across the active 257 geometric conveyor tiers based on real spot values.
     """
+    current_price = np.float64(current_price)
+    live_sol_total = np.float64(live_sol_total)
+    live_usdc_total = np.float64(live_usdc_total)
     total_steps = len(grid_matrix)
-    sol_inventory = np.zeros(total_steps)
-    usdc_inventory = np.zeros(total_steps)
+    sol_inventory = np.zeros(total_steps, dtype=np.float64)
+    usdc_inventory = np.zeros(total_steps, dtype=np.float64)
     
     # Identify which steps are below market (buy lanes) and which are above market (sell lanes)
     below_market_indices = np.where(grid_matrix < current_price)[0]
@@ -699,8 +728,8 @@ def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total:
             sol_inventory[idx] = sol_per_step
             
     print(f"[LIVE INVENTORY MATED] True ledger metrics successfully injected across {total_steps} tiers.")
-    print(f"  Live Asset Allocation Base : {np.sum(sol_inventory):.4f} SOL distributed over {sell_steps_count} sell steps.")
-    print(f"  Live Cash Allocation Base  : ${np.sum(usdc_inventory):.2f} USDC distributed over {buy_steps_count} buy steps.")
+    print(f"  Live Asset Allocation Base : {np.sum(sol_inventory, dtype=np.float64):.4f} SOL distributed over {sell_steps_count} sell steps.")
+    print(f"  Live Cash Allocation Base  : ${np.sum(usdc_inventory, dtype=np.float64):.2f} USDC distributed over {buy_steps_count} buy steps.")
     return sol_inventory, usdc_inventory
 
 
@@ -724,7 +753,9 @@ def initialize_simulation_inventory(
     if len(l1_grid) != len(l2_grid) or len(l1_grid) == 0:
         raise ValueError("Simulation ladders must have matching, non-empty price grids.")
 
-    bucket_budget = total_budget_usdc / (len(l1_grid) + len(l2_grid))
+    current_price = np.float64(current_price)
+    total_budget_usdc = np.float64(total_budget_usdc)
+    bucket_budget = total_budget_usdc / np.float64(len(l1_grid) + len(l2_grid))
     inventories = []
     cash_baselines = []
     for grid in (l1_grid, l2_grid):
@@ -734,7 +765,7 @@ def initialize_simulation_inventory(
         usdc_inventory[buy_indices] = bucket_budget
         sol_inventory[~buy_indices] = bucket_budget / current_price
         inventories.extend((sol_inventory, usdc_inventory))
-        cash_baselines.append(bucket_budget)
+        cash_baselines.append(np.float64(bucket_budget))
 
     print(
         f"[SIMULATION INVENTORY] Allocated ${total_budget_usdc:,.2f} total across "
@@ -765,13 +796,15 @@ def execute_conveyor_bucket_spillover(
     # A zero baseline means this ladder has no funded cash-bucket target yet.
     # In that case, retain sale proceeds at their rung instead of draining them
     # through the ladder and into the vault.
-    cash_bucket_baseline = cash_bucket_baseline
+    cash_bucket_baseline = np.float64(cash_bucket_baseline)
 
-    rung_price = grid_matrix[step_index]
-    cash_limit = CONVEYOR_THRESHOLD_CAP_SOL * rung_price * BUCKET_OVERFLOW_THRESHOLD
+    rung_price = np.float64(grid_matrix[step_index])
+    cash_limit = (
+        CONVEYOR_THRESHOLD_CAP_SOL * rung_price * BUCKET_OVERFLOW_THRESHOLD
+    )
     cash_index = step_index
     while usdc_inventory[cash_index] > cash_limit:
-        excess_cash = float(usdc_inventory[cash_index] - cash_limit)
+        excess_cash = np.float64(usdc_inventory[cash_index] - cash_limit)
         usdc_inventory[cash_index] = cash_limit
         if cash_index > 0:
             lower_step = cash_index - 1
@@ -793,7 +826,7 @@ def execute_conveyor_bucket_spillover(
     asset_index = step_index
     asset_upper_limit = CONVEYOR_THRESHOLD_CAP_SOL * BUCKET_OVERFLOW_THRESHOLD
     while sol_inventory[asset_index] > asset_upper_limit:
-        excess_sol = float(sol_inventory[asset_index] - asset_upper_limit)
+        excess_sol = np.float64(sol_inventory[asset_index] - asset_upper_limit)
         sol_inventory[asset_index] = asset_upper_limit
         if asset_index < len(grid_matrix) - 1:
             upper_step = asset_index + 1
@@ -879,7 +912,7 @@ def apply_interleaved_crossing(
         raise IndexError(f"Invalid rung index {rung_index} for ladder {layer_index + 1}.")
 
     if direction == "UPWARD" and sol_stock[rung_index] > 0:
-        available_sol = float(sol_stock[rung_index])
+        available_sol = np.float64(sol_stock[rung_index])
         if RUN_SIMULATION_PRICE_SHIFTER:
             # check if this is the final event index in our current wave
             fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
@@ -905,7 +938,7 @@ def apply_interleaved_crossing(
             f"({fill_fraction:.1%} fill; fee included)."
         )
     elif direction == "DOWNWARD" and usdc_stock[rung_index] > 0:
-        available_usdc = float(usdc_stock[rung_index])
+        available_usdc = np.float64(usdc_stock[rung_index])
         if RUN_SIMULATION_PRICE_SHIFTER:
             fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
         else:
@@ -1029,12 +1062,13 @@ def log_ladder_state_isolated(
     """
     l1_sol, l1_usdc, l2_sol, l2_usdc = layer_stocks
     total_steps = len(l1_grid)
-    l1_sol_total = float(np.sum(l1_sol))
-    l1_usdc_total = float(np.sum(l1_usdc))
-    l2_sol_total = float(np.sum(l2_sol))
-    l2_usdc_total = float(np.sum(l2_usdc))
+    l1_sol_total = np.sum(l1_sol, dtype=np.float64)
+    l1_usdc_total = np.sum(l1_usdc, dtype=np.float64)
+    l2_sol_total = np.sum(l2_sol, dtype=np.float64)
+    l2_usdc_total = np.sum(l2_usdc, dtype=np.float64)
     total_sol = l1_sol_total + l2_sol_total + OVERFLOW_VAULT["SOL_DUST"]
     total_usdc = l1_usdc_total + l2_usdc_total + OVERFLOW_VAULT["USDC_DUST"]
+    market_price = np.float64(market_price)
     estimated_fund_usd = total_sol * market_price + total_usdc
 
     ladder_state_logger.info(f"=== [GRID_SNAPSHOT_START] Trigger: {context_trigger} ===")
@@ -1235,8 +1269,9 @@ async def main():
             f"combined crossing levels: {len(merged_prices)}; anchor: ${anchor_price:,.4f}."
         )
         print(
-            f"[INVENTORY] L1+L2 totals: {np.sum(l1_sol_stock) + np.sum(l2_sol_stock):.8f} SOL, "
-            f"${np.sum(l1_usdc_stock) + np.sum(l2_usdc_stock):.4f} USDC."
+            f"[INVENTORY] L1+L2 totals: "
+            f"{np.sum(l1_sol_stock, dtype=np.float64) + np.sum(l2_sol_stock, dtype=np.float64):.8f} SOL, "
+            f"${np.sum(l1_usdc_stock, dtype=np.float64) + np.sum(l2_usdc_stock, dtype=np.float64):.4f} USDC."
         )
 
         dump_engine_state_cache(
@@ -1295,7 +1330,7 @@ async def main():
                     direction=direction,
                     layer_index=layer_index,
                     rung_index=rung_index,
-                    rung_price=float(merged_prices[event_index]),
+                    rung_price=np.float64(merged_prices[event_index]),
                     layer_grids=layer_grids,
                     layer_stocks=layer_stocks,
                     cash_bucket_baselines=cash_bucket_baselines,
@@ -1307,8 +1342,12 @@ async def main():
             rebalance_ladder_spillovers(l1_sol_stock, l1_usdc_stock, l1_grid, cash_bucket_baselines[0])
             rebalance_ladder_spillovers(l2_sol_stock, l2_usdc_stock, l2_grid, cash_bucket_baselines[1])
 
-            total_sol = float(np.sum(l1_sol_stock) + np.sum(l2_sol_stock))
-            total_usdc = float(np.sum(l1_usdc_stock) + np.sum(l2_usdc_stock))
+            total_sol = np.sum(l1_sol_stock, dtype=np.float64) + np.sum(
+                l2_sol_stock, dtype=np.float64
+            )
+            total_usdc = np.sum(l1_usdc_stock, dtype=np.float64) + np.sum(
+                l2_usdc_stock, dtype=np.float64
+            )
             print(f"[PORTFOLIO MODEL] {total_sol:.8f} SOL + ${total_usdc:,.4f} USDC")
             print_interleaved_matrix_slice(
                 current_event_index - 3,
