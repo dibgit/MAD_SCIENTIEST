@@ -825,7 +825,6 @@ def rebalance_ladder_spillovers(
             cash_bucket_baseline,
         )
 
-
 def execute_live_onchain_sell(
     layer_index: int,
     rung_index: int,
