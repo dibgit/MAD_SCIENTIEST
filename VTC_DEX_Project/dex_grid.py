@@ -765,33 +765,36 @@ def execute_conveyor_bucket_spillover(
     # A zero baseline means this ladder has no funded cash-bucket target yet.
     # In that case, retain sale proceeds at their rung instead of draining them
     # through the ladder and into the vault.
-    if cash_bucket_baseline > 0:
-        cash_limit = cash_bucket_baseline * BUCKET_OVERFLOW_THRESHOLD
-        cash_index = step_index
-        while usdc_inventory[cash_index] > cash_limit:
-            excess_cash = float(usdc_inventory[cash_index] - cash_bucket_baseline)
-            usdc_inventory[cash_index] = cash_bucket_baseline
-            if cash_index > 0:
-                lower_step = cash_index - 1
-                usdc_inventory[lower_step] += excess_cash
-                print(
-                    f"[CASH CONVEYOR] Step {cash_index + 1} sent "
-                    f"${excess_cash:.4f} USDC down to Step {lower_step + 1}."
-                )
-                cash_index = lower_step
-            else:
-                OVERFLOW_VAULT["USDC_DUST"] += excess_cash
-                print(
-                    f"[CASH FLOOR VAULTED] Step 1 reached the lower boundary; "
-                    f"vaulted ${excess_cash:.4f} USDC."
-                )
-                break
+    cash_bucket_baseline = cash_bucket_baseline
+
+    rung_price = grid_matrix[step_index]
+    cash_limit = CONVEYOR_THRESHOLD_CAP_SOL * rung_price * BUCKET_OVERFLOW_THRESHOLD
+    cash_index = step_index
+    while usdc_inventory[cash_index] > cash_limit:
+        excess_cash = float(usdc_inventory[cash_index] - cash_limit)
+        usdc_inventory[cash_index] = cash_limit
+        if cash_index > 0:
+            lower_step = cash_index - 1
+            usdc_inventory[lower_step] += excess_cash
+            print(
+                f"[CASH CONVEYOR] Step {cash_index + 1} sent "
+                f"${excess_cash:.4f} USDC down to Step {lower_step + 1}."
+            )
+            cash_index = lower_step
+        else:
+            OVERFLOW_VAULT["USDC_DUST"] += excess_cash
+            print(
+                f"[CASH FLOOR VAULTED] Step 1 reached the lower boundary; "
+                f"vaulted ${excess_cash:.4f} USDC."
+            )
+            break
 
     # SOL surplus moves only toward higher-price rungs in this same ladder.
     asset_index = step_index
-    while sol_inventory[asset_index] > CONVEYOR_THRESHOLD_CAP_SOL:
-        excess_sol = float(sol_inventory[asset_index] - CONVEYOR_THRESHOLD_CAP_SOL)
-        sol_inventory[asset_index] = CONVEYOR_THRESHOLD_CAP_SOL
+    asset_upper_limit = CONVEYOR_THRESHOLD_CAP_SOL * BUCKET_OVERFLOW_THRESHOLD
+    while sol_inventory[asset_index] > asset_upper_limit:
+        excess_sol = float(sol_inventory[asset_index] - asset_upper_limit)
+        sol_inventory[asset_index] = asset_upper_limit
         if asset_index < len(grid_matrix) - 1:
             upper_step = asset_index + 1
             sol_inventory[upper_step] += excess_sol
