@@ -1351,7 +1351,12 @@ async def main():
             )
             analyze_and_suggest_ladder_expansion()
             previous_event_index = current_event_index
-            await asyncio.sleep(3)
+            if RUN_SIMULATION_PRICE_SHIFTER:
+                # Fast-forward lab tests at 20 ticks per second to audit multi-day curves instantly
+                await asyncio.sleep(0.05) 
+            else:
+                # Production Track: Paced threshold buffer to protect Alchemy RPC node limits
+                await asyncio.sleep(3.0)
 
 
 if __name__ == "__main__":
