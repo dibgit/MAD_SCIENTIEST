@@ -5,6 +5,7 @@ import asyncio
 import struct
 import csv
 import time
+import random
 import logging
 from logging.handlers import RotatingFileHandler
 import subprocess
@@ -862,6 +863,7 @@ def apply_interleaved_crossing(
     layer_grids: tuple[np.ndarray, np.ndarray],
     layer_stocks: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     cash_bucket_baselines: tuple[float, float],
+    is_terminal_step: bool,  # Passed from the main crossing event scanner
 ) -> None:
     """Updates one ladder's local inventory accounting for a crossed price level."""
     l1_sol, l1_usdc, l2_sol, l2_usdc = layer_stocks
@@ -876,12 +878,16 @@ def apply_interleaved_crossing(
 
     if direction == "UPWARD" and sol_stock[rung_index] > 0:
         available_sol = float(sol_stock[rung_index])
-        fill_fraction = execute_live_onchain_sell(
-            layer_index,
-            rung_index,
-            available_sol,
-            rung_price,
-        )
+        if RUN_SIMULATION_PRICE_SHIFTER:
+            # check if this is the final event index in our current wave
+            fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
+        else:
+            fill_fraction = execute_live_onchain_sell(
+                layer_index,
+                rung_index,
+                available_sol,
+                rung_price,
+            )
         if not np.isfinite(fill_fraction) or not 0.0 <= fill_fraction <= 1.0:
             raise ValueError(f"Sell adapter returned invalid fill fraction: {fill_fraction}")
         sol_sold = available_sol * fill_fraction
@@ -898,12 +904,15 @@ def apply_interleaved_crossing(
         )
     elif direction == "DOWNWARD" and usdc_stock[rung_index] > 0:
         available_usdc = float(usdc_stock[rung_index])
-        fill_fraction = execute_live_onchain_buy(
-            layer_index,
-            rung_index,
-            available_usdc,
-            rung_price,
-        )
+        if RUN_SIMULATION_PRICE_SHIFTER:
+            fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
+        else:
+            fill_fraction = execute_live_onchain_buy(
+                layer_index,
+                rung_index,
+                available_usdc,
+                rung_price,
+            )
         if not np.isfinite(fill_fraction) or not 0.0 <= fill_fraction <= 1.0:
             raise ValueError(f"Buy adapter returned invalid fill fraction: {fill_fraction}")
         usdc_spent = available_usdc * fill_fraction
@@ -1274,8 +1283,12 @@ async def main():
                 f"combined index {previous_event_index + 1} -> {current_event_index + 1}."
             )
 
+            # Convert crossed_indices to a list to safely capture the terminal tracking index
+            crossed_list = list(crossed_indices)
             for event_index in crossed_indices:
                 layer_index, rung_index = merged_sources[event_index]
+                # Evaluates to True ONLY for the absolute final step in the current wave profile
+                terminal_flag = (event_index == crossed_list[-1])
                 apply_interleaved_crossing(
                     direction=direction,
                     layer_index=layer_index,
@@ -1284,7 +1297,13 @@ async def main():
                     layer_grids=layer_grids,
                     layer_stocks=layer_stocks,
                     cash_bucket_baselines=cash_bucket_baselines,
+                    is_terminal_step=terminal_flag
                 )
+            # GLOBAL INTERLEAVED PERSISTENCE SWEEP
+            # Ensures any asset or cash surplus pushed past boundary caps cascades 
+            # completely into permanent long-term vault archives unconditionally.
+            rebalance_ladder_spillovers(l1_sol_stock, l1_usdc_stock, l1_grid, cash_bucket_baselines[0])
+            rebalance_ladder_spillovers(l2_sol_stock, l2_usdc_stock, l2_grid, cash_bucket_baselines[1])
 
             total_sol = float(np.sum(l1_sol_stock) + np.sum(l2_sol_stock))
             total_usdc = float(np.sum(l1_usdc_stock) + np.sum(l2_usdc_stock))
@@ -1310,13 +1329,16 @@ async def main():
                 market_price=live_price,
                 last_vault_time=last_git_vault_timestamp,
             )
+            # Resolve clean initialization focus row index parameter
+            active_focal_rung = previous_event_index if previous_event_index is not None else 0
+
             log_ladder_state_isolated(
-                f"CROSSING_EVENT_{direction}_TICK_{loop_counter}",
-                current_event_index,
+                "ENGINE_BOOT_INITIALIZATION",
+                active_focal_rung,
                 l1_grid,
                 l2_grid,
                 layer_stocks,
-                live_price,
+                calibrated_boot_price,
             )
             dump_engine_state_cache(
                 anchor_price,
