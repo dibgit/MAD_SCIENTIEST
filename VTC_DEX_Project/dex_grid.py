@@ -27,7 +27,7 @@ load_dotenv()
 # STRATEGIC DYNAMIC MODE CONFIGURATION MATRIX (WINMERGE TARGET)
 # ==============================================================================
 # Global Operational Mode Selector Switch: "OPTION_A" or "OPTION_B"
-GRID_EXECUTION_MODE = "OPTION_B"
+GRID_EXECUTION_MODE = "OPTION_A"
 
 # --- LEGACY OPTION A CONFIGURATION BLOCK ---
 if GRID_EXECUTION_MODE == "OPTION_A":
