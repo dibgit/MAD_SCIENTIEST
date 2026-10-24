@@ -27,7 +27,7 @@ load_dotenv()
 # STRATEGIC DYNAMIC MODE CONFIGURATION MATRIX (WINMERGE TARGET)
 # ==============================================================================
 # Global Operational Mode Selector Switch: "OPTION_A" or "OPTION_B"
-GRID_EXECUTION_MODE = "OPTION_A"
+GRID_EXECUTION_MODE = "OPTION_B"
 
 # --- LEGACY OPTION A CONFIGURATION BLOCK ---
 if GRID_EXECUTION_MODE == "OPTION_A":
@@ -281,10 +281,9 @@ def load_engine_state_cache(current_price: float) -> dict | None:
         if not np.isfinite(anchor_price) or anchor_price <= 0:
             raise ValueError("Cached anchor price must be finite and positive.")
 
-        new_l1_grid, new_l2_grid = generate_ladders_for_size(
-            anchor_price * 0.50,
-            anchor_price * 1.50,
-            NUMBER_OF_LADDER,
+        new_l1_grid, new_l2_grid = generate_infinite_interleaved_matrix(
+            anchor_price,
+            mode="geometric",
         )
 
         def validate_stock(key_name):
@@ -330,10 +329,10 @@ def load_engine_state_cache(current_price: float) -> dict | None:
                 raise ValueError("Cached ladder inventory arrays have inconsistent lengths.")
             old_size = old_sizes.pop()
             source_size = old_size
-            old_l1_grid, old_l2_grid = generate_ladders_for_size(
-                anchor_price * 0.50,
-                anchor_price * 1.50,
+            old_l1_grid, old_l2_grid = generate_pure_geometric_mesh(
+                anchor_price,
                 old_size,
+                MIN_ROUND_TRIP_GAP_PCT
             )
             l1_sol = map_stock_to_grid(old_l1_sol, old_l1_grid, new_l1_grid)
             l1_usdc = map_stock_to_grid(old_l1_usdc, old_l1_grid, new_l1_grid)
@@ -345,10 +344,10 @@ def load_engine_state_cache(current_price: float) -> dict | None:
             if len(old_sol) != len(old_usdc):
                 raise ValueError("Cached single-ladder inventory arrays have inconsistent lengths.")
             source_size = len(old_sol)
-            old_l1_grid, _ = generate_ladders_for_size(
-                anchor_price * 0.50,
-                anchor_price * 1.50,
+            old_l1_grid, _ = generate_pure_geometric_mesh(
+                anchor_price,
                 len(old_sol),
+                MIN_ROUND_TRIP_GAP_PCT
             )
             half_sol = old_sol * 0.5
             half_usdc = old_usdc * 0.5
@@ -612,53 +611,107 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
         print(f"[ERROR] On-chain cryptograph execution failure: {e}")
         return None
 
-def generate_ladders_for_size(
-    low_price: float,
-    high_price: float,
+def generate_pure_geometric_mesh(
+    anchor_price: float,
     rung_count: int,
-    mode: str = "geometric",
+    gap_pct: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Builds two same-length ladders with Ladder 2 half a rung above Ladder 1."""
-    low_price = np.float64(low_price)
-    high_price = np.float64(high_price)
-    if not (0 < low_price < high_price):
-        raise ValueError("Ladder boundaries must be positive and low_price must be below high_price.")
-    if rung_count < 2:
-        raise ValueError("Interleaved ladders require at least two rungs per ladder.")
+    """
+    REPLACES np.geomspace(): Generates a symmetrical interleaved dual-ladder grid 
+    built directly out from a central anchor price using a fixed geometric trading spread.
+    """
+    anchor_price = np.float64(anchor_price)
+    gap_pct = np.float64(gap_pct)
+    
+    # Establish your constant geometric multiplier ratio (e.g., 1.01362703 for Option B)
+    # CORRECTED SYSTEM DEPENDENCY: Scales the buy-rung distance to exactly 
+    # double your execution spread, preventing gridlock order collisions.
+    step_multiplier = np.float64(1.0) + (gap_pct * np.float64(2.0))
+    # Determine the number of tiers to deploy above and below your active working center anchor
+    # Using an equal split gives your matrix a perfectly balanced bidirectional runway
+    half_rungs = rung_count // 2
+    
+    # --- GENERATE LADDER 1 BASELINE CROSSINGS ---
+    l1_grid = np.zeros(rung_count, dtype=np.float64)
+    l1_grid[half_rungs] = anchor_price
+    
+    # Project prices downward for the lower buy rungs
+    for i in range(half_rungs - 1, -1, -1):
+        l1_grid[i] = l1_grid[i + 1] / step_multiplier
+        
+    # Project prices upward for the higher sell rungs
+    for i in range(half_rungs + 1, rung_count):
+        l1_grid[i] = l1_grid[i - 1] * step_multiplier
 
-    if mode == "arithmetic":
-        l1_grid = np.linspace(low_price, high_price, rung_count, dtype=np.float64)
-        step_offset = (l1_grid[1] - l1_grid[0]) / 2.0
-        l2_grid = l1_grid + step_offset
-    elif mode == "geometric":
-        l1_grid = np.geomspace(low_price, high_price, rung_count, dtype=np.float64)
-        half_step_ratio = np.sqrt(l1_grid[1] / l1_grid[0])
-        l2_grid = l1_grid * half_step_ratio
-    else:
-        raise ValueError(f"Unsupported ladder spacing mode: {mode}")
+    # --- GENERATE LADDER 2 STAGGERED MIDZONE INTERLEAVE ---
+    # To place Ladder 2 perfectly between Ladder 1's rungs geometrically, 
+    # we multiply Ladder 1 by the square root of your step multiplier
+    # half_step_ratio = np.sqrt(step_multiplier)
+    half_step_ratio = np.sqrt(step_multiplier) * (np.float64(1.0) + (gap_pct * np.float64(0.5)))
+    l2_grid = l1_grid * half_step_ratio
+
+    return l1_grid, l2_grid
+
+
+def generate_pure_arithmetic_mesh(
+    anchor_price: float,
+    rung_count: int,
+    gap_pct: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    REPLACES np.linspace(): Generates a symmetrical interleaved dual-ladder grid 
+    built directly out from a central anchor price using a localized linear volatility step size.
+    """
+    anchor_price = np.float64(anchor_price)
+    gap_pct = np.float64(gap_pct)
+    
+    # Derive a static dollar increment bound right at your active center spot price
+    # Example: If SOL is $100 and gap is 1.363%, your flat stepping increment is exactly $1.363
+    linear_dollar_step = anchor_price * (gap_pct * np.float64(2.0))
+    
+    half_rungs = rung_count // 2
+    
+    # --- GENERATE LADDER 1 LINEAR PROGRESSIONS ---
+    l1_grid = np.zeros(rung_count, dtype=np.float64)
+    l1_grid[half_rungs] = anchor_price
+    
+    for i in range(half_rungs - 1, -1, -1):
+        l1_grid[i] = l1_grid[i + 1] - linear_dollar_step
+        
+    for i in range(half_rungs + 1, rung_count):
+        l1_grid[i] = l1_grid[i - 1] + linear_dollar_step
+
+    # --- GENERATE LADDER 2 STAGGERED MIDZONE INTERLEAVE ---
+    # To place Ladder 2 perfectly between Ladder 1's rungs arithmetically, 
+    # we shift it upward by exactly half of your flat linear dollar step
+    l2_grid = l1_grid + (linear_dollar_step / 2.0)
 
     return l1_grid, l2_grid
 
 
 def generate_infinite_interleaved_matrix(
-    low_price: float,
-    high_price: float,
+    low_price: float,  # This now acts as our central anchor spot price parameter input
     mode: str = "geometric",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Generates the configured pair of interleaved price ladders."""
-    l1_grid, l2_grid = generate_ladders_for_size(
-        low_price,
-        high_price,
-        NUMBER_OF_LADDER,
-        mode,
+    """Generates the configured pair of interleaved price ladders using pure scaling mesh rules."""
+    
+    # Force direct execution routing straight to your pure scaling mesh structures
+    if mode == "arithmetic":
+        l1_grid, l2_grid = generate_pure_arithmetic_mesh(low_price, NUMBER_OF_LADDER, MIN_ROUND_TRIP_GAP_PCT)
+    else:
+        l1_grid, l2_grid = generate_pure_geometric_mesh(low_price, NUMBER_OF_LADDER, MIN_ROUND_TRIP_GAP_PCT)
+        
+    # Flatten arrays explicitly via .ravel() to guarantee string interpolation handles them as scalar layers
+    l1_flat = l1_grid.ravel()
+    l2_flat = l2_grid.ravel()
+
+    print(
+        f"[INTERLEAVE INITIALIZED] Ladder 1: {len(l1_flat)} rungs "
+        f"(${float(l1_flat[0]):,.4f}-${float(l1_flat[-1]):,.4f})"
     )
     print(
-        f"[INTERLEAVE INITIALIZED] Ladder 1: {len(l1_grid)} rungs "
-        f"(${l1_grid[0]:,.4f}-${l1_grid[-1]:,.4f})"
-    )
-    print(
-        f"[INTERLEAVE INITIALIZED] Ladder 2: {len(l2_grid)} rungs "
-        f"(${l2_grid[0]:,.4f}-${l2_grid[-1]:,.4f})"
+        f"[INTERLEAVE INITIALIZED] Ladder 2: {len(l2_flat)} rungs "
+        f"(${float(l2_flat[0]):,.4f}-${float(l2_flat[-1]):,.4f})"
     )
     return l1_grid, l2_grid
 
@@ -814,6 +867,8 @@ def execute_conveyor_bucket_spillover(
                 f"${excess_cash:.4f} USDC down to Step {lower_step + 1}."
             )
             cash_index = lower_step
+            # Recalculate cash limit for the lower step to keep the loop mathematically bounded
+            cash_limit = CONVEYOR_THRESHOLD_CAP_SOL * np.float64(grid_matrix[cash_index]) * BUCKET_OVERFLOW_THRESHOLD
         else:
             OVERFLOW_VAULT["USDC_DUST"] += excess_cash
             print(
@@ -1024,28 +1079,46 @@ def execute_automated_git_vault(tick_id: int, current_step: int, market_price: f
         print(f"[ERROR] Automated vault interface routine failure: {e}")
         return last_vault_time
 
-def print_interleaved_matrix_slice(
-    start_idx: int,
-    end_idx: int,
+def print_interleaved_ladder_state(
+    event_id: int,
     l1_grid: np.ndarray,
     l2_grid: np.ndarray,
     layer_stocks: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
 ) -> None:
     l1_sol, l1_usdc, l2_sol, l2_usdc = layer_stocks
-    merged_prices, merged_sources = build_interleaved_event_mesh(l1_grid, l2_grid)
-    start = max(0, min(start_idx, len(merged_prices) - 1))
-    end = max(start, min(end_idx, len(merged_prices) - 1))
-    for event_index in range(start, end + 1):
-        layer_index, rung_index = merged_sources[event_index]
-        if layer_index == 0:
-            sol_balance, usdc_balance = l1_sol[rung_index], l1_usdc[rung_index]
-        else:
-            sol_balance, usdc_balance = l2_sol[rung_index], l2_usdc[rung_index]
-        print(
-            f"  [{event_index + 1:03d}] L{layer_index + 1} rung {rung_index + 1:03d} "
-            f"${merged_prices[event_index]:,.4f} | {sol_balance:.6f} SOL | "
-            f"{usdc_balance:.4f} USDC"
+    ladder_size = len(l1_grid)
+    if any(
+        len(values) != ladder_size
+        for values in (l2_grid, l1_sol, l1_usdc, l2_sol, l2_usdc)
+    ):
+        raise ValueError("Both ladders and their inventory arrays must have equal lengths.")
+
+    header = (
+        "Rung | Buy price (USDC/SOL) | Buy fund (USDC) | "
+        "Sell price (USDC/SOL) | Sell fund (SOL)"
+    )
+    print(f"[USDC/SOL LADDER AFTER EVENT {event_id:03d}]")
+    print(f"{'L1':<2} {header} || {'L2':<2} {header}")
+    for rung_index in range(ladder_size):
+        l1_buy_price = np.float64(l1_grid[rung_index])
+        l2_buy_price = np.float64(l2_grid[rung_index])
+        l1_sell_price = l1_buy_price * (
+            np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT
         )
+        l2_sell_price = l2_buy_price * (
+            np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT
+        )
+        l1_row = (
+            f"{rung_index + 1:4d} | {l1_buy_price:19.6f} | "
+            f"{l1_usdc[rung_index]:15.2f} | {l1_sell_price:21.6f} | "
+            f"{l1_sol[rung_index]:14.4f}"
+        )
+        l2_row = (
+            f"{rung_index + 1:4d} | {l2_buy_price:19.6f} | "
+            f"{l2_usdc[rung_index]:15.2f} | {l2_sell_price:21.6f} | "
+            f"{l2_sol[rung_index]:14.4f}"
+        )
+        print(f"{l1_row} || {l2_row}")
 
 
 def log_ladder_state_isolated(
@@ -1201,8 +1274,7 @@ async def main():
         grid_floor = anchor_price * 0.50
         grid_ceiling = anchor_price * 1.50
         l1_grid, l2_grid = generate_infinite_interleaved_matrix(
-            grid_floor,
-            grid_ceiling,
+            anchor_price,
             mode="geometric",
         )
         merged_prices, merged_sources = build_interleaved_event_mesh(l1_grid, l2_grid)
@@ -1349,9 +1421,8 @@ async def main():
                 l2_usdc_stock, dtype=np.float64
             )
             print(f"[PORTFOLIO MODEL] {total_sol:.8f} SOL + ${total_usdc:,.4f} USDC")
-            print_interleaved_matrix_slice(
-                current_event_index - 3,
-                current_event_index + 3,
+            print_interleaved_ladder_state(
+                loop_counter,
                 l1_grid,
                 l2_grid,
                 layer_stocks,
