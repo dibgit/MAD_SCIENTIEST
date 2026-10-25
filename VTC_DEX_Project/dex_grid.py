@@ -362,16 +362,26 @@ def load_engine_state_cache(current_price: float) -> dict | None:
         else:
             raise ValueError("Cache does not contain a recognized ladder inventory schema.")
 
-        if source_size != NUMBER_OF_LADDER:
+        # Identify if an environmental parameter change has been triggered
+        size_changed = (source_size != NUMBER_OF_LADDER)
+
+        if size_changed:
             print(
                 f"[STATE MIGRATION] Remapped {source_size} cached rung(s) per source ladder "
                 f"to {NUMBER_OF_LADDER} configured rung(s) per ladder."
             )
+            # DYNAMIC SPREAD STEP NORMALIZER: Recalculate baselines to scale smoothly with your new ladder size
+            reference_price = current_price if current_price > 0 else anchor_price
+            cash_baselines = (
+                np.sum(l1_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l1_grid < reference_price))),
+                np.sum(l2_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l2_grid < reference_price))),
+            )
+        else:
+            cash_baselines = state_data.get(
+                "cash_bucket_baselines",
+                (np.float64(0.0), np.float64(0.0)),
+            )
 
-        cash_baselines = state_data.get(
-            "cash_bucket_baselines",
-            (np.float64(0.0), np.float64(0.0)),
-        )
         if len(cash_baselines) != 2 or any(
             not np.isfinite(np.float64(value)) or np.float64(value) < 0
             for value in cash_baselines
@@ -1188,7 +1198,7 @@ def analyze_and_suggest_ladder_expansion():
                 return # Insufficient statistical track data collected
                 
             # Extract historical step crossing tracks
-            steps_logged = [int(row[3]) for row in lines[1:] if row[3].isdigit()]
+            steps_logged = [int(row[3]) for row in lines[1:] if len(row) > 3 and row[3].strip().isdigit()]
             if not steps_logged:
                 return
                 
