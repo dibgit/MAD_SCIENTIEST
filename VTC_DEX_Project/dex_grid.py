@@ -729,35 +729,69 @@ def generate_infinite_interleaved_matrix(
 def build_interleaved_event_mesh(
     l1_grid: np.ndarray,
     l2_grid: np.ndarray,
-) -> tuple[np.ndarray, list[tuple[int, int]]]:
-    """Returns sorted prices with each event's source ladder and rung index."""
-    events = [
-        (np.float64(price), 0, rung_index)
-        for rung_index, price in enumerate(l1_grid)
-    ] + [
-        (np.float64(price), 1, rung_index)
-        for rung_index, price in enumerate(l2_grid)
-    ]
+) -> tuple[np.ndarray, list[tuple[int, int, str]]]:
+    """
+    REFACTORED COMPILER: Interleaves both BUY and profit-taking SELL milestones 
+    for both ladders into a single chronological matrix to prevent scanner gridlock.
+    """
+    events = []
+    
+    # Map Ladder 1 Targets
+    for idx, buy_p in enumerate(l1_grid):
+        sell_p = buy_p * (np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT)
+        events.append((np.float64(buy_p), 0, idx, "BUY"))
+        events.append((np.float64(sell_p), 0, idx, "SELL"))
+        
+    # Map Ladder 2 Targets
+    for idx, buy_p in enumerate(l2_grid):
+        sell_p = buy_p * (np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT)
+        events.append((np.float64(buy_p), 1, idx, "BUY"))
+        events.append((np.float64(sell_p), 1, idx, "SELL"))
+        
+    # Sort everything chronologically by price
     events.sort(key=lambda event: event[0])
+    
     prices = np.array([event[0] for event in events], dtype=np.float64)
-    sources = [(event[1], event[2]) for event in events]
+    # Store the ladder index, rung index, and the specific order-type filter string
+    sources = [(event[1], event[2], event[3]) for event in events]
     return prices, sources
 
 
 def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
-    """Apply the optional smooth price wave for local ladder-accounting tests."""
+    """
+    Apply the optional price wave or precise debugging toggle flags 
+    for local ladder-accounting and leakage isolation tests.
+    """
     real_oracle_price = np.float64(real_oracle_price)
-    if not RUN_SIMULATION_PRICE_SHIFTER or current_tick <= 5:
-        return real_oracle_price
+    
+    # STRUCTURAL DEBUG TOGGLE: Set to True to engage precision threshold switching
+    DEBUG_0 = True
 
-    wave_frequency = np.float64(current_tick - 5) * (
-        np.float64(2.0) * np.pi / np.float64(60.0)
-    )
-    simulated_price = real_oracle_price * (
-        np.float64(1.0) + np.sin(wave_frequency) * np.float64(0.30)
-    )
-    print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
-    return simulated_price
+    if DEBUG_0:
+        # Precision Switch Lane: Flips strictly between the exact Buy and Sell anchors of L1 Rung 1
+        # Even ticks simulate an upward hit (Sell), odd ticks simulate a downward hit (Buy)
+        if current_tick % 2 == 0:
+            simulated_price = np.float64(102.851418)
+        else:
+            simulated_price = np.float64(101.468699)
+            
+        print(f"[DEBUG_0 ACTIVE] Loop Counter: {current_tick} | Forced Target Price: ${simulated_price:.6f}")
+        return simulated_price
+
+    else:
+        # ---- STANDARD SIMULATION SINE WAVE TRACK (DEBUG_0 == FALSE) ----
+        if not RUN_SIMULATION_PRICE_SHIFTER or current_tick <= 5:
+            return real_oracle_price
+
+        wave_frequency = np.float64(current_tick - 5) * (
+            np.float64(2.0) * np.pi / np.float64(60.0)
+        )
+        simulated_price = real_oracle_price * (
+            np.float64(1.0) + np.sin(wave_frequency) * np.float64(0.30)
+        )
+        print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
+        return simulated_price
+
 
 
 def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total: float, live_usdc_total: float):
@@ -993,7 +1027,11 @@ def apply_interleaved_crossing(
         sol_sold = available_sol * fill_fraction
         if sol_sold == 0:
             return
-        usdc_received = sol_sold * rung_price * (1.0 - DEX_EXECUTION_FEE_RATE)
+
+        # REALIZATION PASS: Multiplies the base buy price by your spread factor 
+        # to ensure the sell order executes exactly at your Option B profit target
+        explicit_sell_price = rung_price * (np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT)
+        usdc_received = sol_sold * explicit_sell_price * (1.0 - DEX_EXECUTION_FEE_RATE)
         sol_stock[rung_index] -= sol_sold
         usdc_stock[rung_index] += usdc_received
         print(
@@ -1381,7 +1419,21 @@ async def main():
                 continue
 
             live_price = get_simulated_price(live_price, loop_counter)
-            current_event_index = int(np.abs(merged_prices - live_price).argmin())
+
+            # DIRECT BOUNDARY CROSSING SCANNER: Evaluates explicit price level breaches 
+            # instead of falling back to the closest mathematical neighbor
+            current_event_index = previous_event_index
+            if live_price > merged_prices[previous_event_index]:
+                # Scan upward to find the highest price level strictly breached
+                print(f"[TICK {loop_counter}] Price has risen above the previous level; scanning upward for crossings. Live Price = ${live_price:,.4f}, Previous Level = ${merged_prices[previous_event_index]:,.4f}")
+                while current_event_index < len(merged_prices) - 1 and live_price >= merged_prices[current_event_index + 1]:
+                    current_event_index += 1
+            elif live_price < merged_prices[previous_event_index]:
+                # Scan downward to find the lowest price level strictly breached
+                print(f"[TICK {loop_counter}] Price has fallen below the previous level; scanning downward for crossings.Live Price = ${live_price:,.4f}, Previous Level = ${merged_prices[previous_event_index]:,.4f}")
+                while current_event_index > 0 and live_price <= merged_prices[current_event_index - 1]:
+                    current_event_index -= 1
+
             if current_event_index == previous_event_index:
                 print(
                     f"[TICK {loop_counter}] Price ${live_price:,.4f} remains near combined level "
@@ -1401,13 +1453,34 @@ async def main():
                 f"[CROSSING] {direction}: {steps_moved} interleaved level(s), "
                 f"combined index {previous_event_index + 1} -> {current_event_index + 1}."
             )
-
+            
             # Convert crossed_indices to a list to safely capture the terminal tracking index
             crossed_list = list(crossed_indices)
-            for event_index in crossed_indices:
-                layer_index, rung_index = merged_sources[event_index]
-                # Evaluates to True ONLY for the absolute final step in the current wave profile
-                terminal_flag = (event_index == crossed_list[-1])
+            for event_index in crossed_list:
+                layer_index, rung_index, target_order_type = merged_sources[event_index]
+                
+                # --- CRITICAL LIQUIDITY CONSUMPTION CORRECTION ---
+                # A step is only considered a partial terminal tail if the live market price 
+                # has landed exactly on it without crossing past its boundary threshold line.
+                if event_index == crossed_list[-1]:
+                    # If the wave completely cleared past this level, it forces a 100% fill.
+                    if direction == "UPWARD" and live_price > merged_prices[event_index]:
+                        terminal_flag = False
+                    elif direction == "DOWNWARD" and live_price < merged_prices[event_index]:
+                        terminal_flag = False
+                    else:
+                        terminal_flag = True
+                else:
+                    # Intermediate rungs passed completely through by the wave are always 100% filled
+                    terminal_flag = False
+                
+                # Dynamic Filter Gate
+                if direction == "UPWARD" and target_order_type != "SELL":
+                    continue
+                if direction == "DOWNWARD" and target_order_type != "BUY":
+                    continue
+
+
                 apply_interleaved_crossing(
                     direction=direction,
                     layer_index=layer_index,
