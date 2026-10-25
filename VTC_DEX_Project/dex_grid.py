@@ -771,19 +771,20 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
         # Precision Switch Lane: Flips strictly between the exact Buy and Sell anchors of L1 Rung 1
         # Even ticks simulate an upward hit (Sell), odd ticks simulate a downward hit (Buy)
         if current_tick % 2 == 0:
-            #simulated_price = np.float64(102.851418) #target price for L1 rung 1 buy-->OK
+            simulated_price = np.float64(102.851418) #target price for L1 rung 1 buy-->OK
             #simulated_price = np.float64(125.821555) #target price for L1 rung 9 buy-->OK
             #simulated_price = np.float64(103.542838)  #target price for L2 rung 1 buy-->OK
             #simulated_price = np.float64(128.393495)  #target price for L2 rung 9 buy--> OK
-            simulated_price = np.float64(136.391924)  #target price for L1 rung 12 buy--> OK
+            #simulated_price = np.float64(136.391924)  #target price for L1 rung 12 buy--> OK
+            #simulated_price = np.float64(139.179935)  #target price for L2 rung 12 buy--> OK
         else:
             #simulated_price = np.float64(101.468699) #target price for L1 rung 1 sell-->OK
             #simulated_price = np.float64(127.536132) #target price for L1 rung 9 sell-->OK
             #simulated_price = np.float64(104.953821)  #target price for L2 rung 1 sell-->OK
             #simulated_price = np.float64(130.143119)  #target price for L2 rung 9 sell--> OK
-            simulated_price = np.float64(138.250544)  #target price for L1 rung 12 sell--> OK
+            #simulated_price = np.float64(138.250544)  #target price for L1 rung 12 sell--> OK
+            simulated_price = np.float64(141.076547)  #target price for L2 rung 12 sell--> OK
 
-#136.391925 |            0.00 |            138.250543 |         0.3495 ||   12 |          139.179936 |            0.00 |            141.076546 |
         print(f"[DEBUG_0 ACTIVE] Loop Counter: {current_tick} | Forced Target Price: ${simulated_price:.6f}")
         return simulated_price
 
