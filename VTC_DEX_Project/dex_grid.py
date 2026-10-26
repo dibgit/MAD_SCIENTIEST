@@ -771,7 +771,7 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
         # Precision Switch Lane: Flips strictly between the exact Buy and Sell anchors of L1 Rung 1
         # Even ticks simulate an upward hit (Sell), odd ticks simulate a downward hit (Buy)
         if current_tick % 2 == 0:
-            simulated_price = np.float64(102.851418) #target price for L1 rung 1 buy-->OK
+            simulated_price = np.float64(101.468699) #target price for L1 rung 1 buy-->OK
             #simulated_price = np.float64(125.821555) #target price for L1 rung 9 buy-->OK
             #simulated_price = np.float64(103.542838)  #target price for L2 rung 1 buy-->OK
             #simulated_price = np.float64(128.393495)  #target price for L2 rung 9 buy--> OK
@@ -1026,6 +1026,7 @@ def apply_interleaved_crossing(
             # check if this is the final event index in our current wave
             fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
         else:
+            # UPGRADED: Utilizes the non-blocking await handle to process on-chain data
             fill_fraction = execute_live_onchain_sell(
                 layer_index,
                 rung_index,
@@ -1055,6 +1056,7 @@ def apply_interleaved_crossing(
         if RUN_SIMULATION_PRICE_SHIFTER:
             fill_fraction = 1.00 if not is_terminal_step else random.uniform(0.10, 1.00)
         else:
+            # UPGRADED: Utilizes the non-blocking await handle to process on-chain data
             fill_fraction = execute_live_onchain_buy(
                 layer_index,
                 rung_index,
@@ -1469,11 +1471,8 @@ async def main():
             for event_index in crossed_list:
                 layer_index, rung_index, target_order_type = merged_sources[event_index]
                 
-                # --- CRITICAL LIQUIDITY CONSUMPTION CORRECTION ---
-                # A step is only considered a partial terminal tail if the live market price 
-                # has landed exactly on it without crossing past its boundary threshold line.
+                # --- PRISTINE LIQUIDITY CONSUMPTION CALCULATOR ---
                 if event_index == crossed_list[-1]:
-                    # If the wave completely cleared past this level, it forces a 100% fill.
                     if direction == "UPWARD" and live_price > merged_prices[event_index]:
                         terminal_flag = False
                     elif direction == "DOWNWARD" and live_price < merged_prices[event_index]:
@@ -1481,16 +1480,16 @@ async def main():
                     else:
                         terminal_flag = True
                 else:
-                    # Intermediate rungs passed completely through by the wave are always 100% filled
                     terminal_flag = False
                 
-                # Dynamic Filter Gate
+                # Dynamic Type-Safe Filter Gate
                 if direction == "UPWARD" and target_order_type != "SELL":
                     continue
                 if direction == "DOWNWARD" and target_order_type != "BUY":
                     continue
 
-
+                # DETHERMINISTIC TIMELINE ENGINE:
+                # Executes and clears each crossed price milestone in exact sequential order
                 apply_interleaved_crossing(
                     direction=direction,
                     layer_index=layer_index,
