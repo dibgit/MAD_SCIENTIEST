@@ -765,7 +765,7 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
     real_oracle_price = np.float64(real_oracle_price)
     
     # STRUCTURAL DEBUG TOGGLE: Set to True to engage precision threshold switching
-    DEBUG_0 = True
+    DEBUG_0 = False
 
     if DEBUG_0:
         # Precision Switch Lane: Flips strictly between the exact Buy and Sell anchors of L1 Rung 1
