@@ -1315,21 +1315,30 @@ async def main():
             return
 
         print("[CONNECTION] RPC node status: online")
-        live_sol = 0.0
-        live_usdc = 0.0
-        if INVENTORY_MODE == "WALLET":
+        
+        # Query real on-chain spot pricing anchors out of the Pyth contract first
+        calibrated_boot_price = await fetch_onchain_price(client, "SOL/USD")
+        if calibrated_boot_price is None or not np.isfinite(calibrated_boot_price) or calibrated_boot_price <= 0:
+            print("[CRITICAL] Initial price contract synchronization failed. Aborting initialization.")
+            return
+
+        # --- PHASE 1 ADAPTER BRIDGE ROW: UNIFIED LEDGER INTERROGATION ---
+        if RUN_SIMULATION_PRICE_SHIFTER:
+            # SHADOW SIMULATION MODE: Mimic true hardware wallets by populating an authentic asset base
+            print(f"[INTERFACE ADAPTER] Engagement Mode: LABORATORY SHADOW WALLET SIMULATION.")
+            live_usdc = INITIAL_ALLOCATION_USDC
+            live_sol = INITIAL_ALLOCATION_USDC / calibrated_boot_price
+        else:
+            # LIVE PRODUCTION MODE: Execute absolute cryptograph balance scans straight from Web3 nodes
+            print(f"[INTERFACE ADAPTER] Engagement Mode: LIVE PRODUCTION WALLET MONITORING.")
             live_sol = await fetch_live_token_balance(client, "SOL")
             live_usdc = await fetch_live_token_balance(client, "USDC")
+            
             if live_sol <= 0 and live_usdc <= 0:
-                print("[CRITICAL] No SOL or USDC balance was available to initialize the ladders.")
+                print("[CRITICAL] Interrogated on-chain wallet balance holds 0 assets. Halting engine.")
                 return
-        else:
-            print(
-                f"[SIMULATION MODE] Using configured ${INITIAL_ALLOCATION_USDC:,.2f} "
-                "virtual budget; live wallet balances are not used."
-            )
+        # ----------------------------------------------------------------
 
-        calibrated_boot_price = await fetch_onchain_price(client, "SOL/USD")
         if calibrated_boot_price is None or not np.isfinite(calibrated_boot_price) or calibrated_boot_price <= 0:
             print("[CRITICAL] Price calibration failed; the ladders were not initialized.")
             return
