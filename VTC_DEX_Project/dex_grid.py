@@ -372,10 +372,20 @@ def load_engine_state_cache(current_price: float) -> dict | None:
             )
             # DYNAMIC SPREAD STEP NORMALIZER: Recalculate baselines to scale smoothly with your new ladder size
             reference_price = current_price if current_price > 0 else anchor_price
-            cash_baselines = (
-                np.sum(l1_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l1_grid < reference_price))),
-                np.sum(l2_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l2_grid < reference_price))),
-            )
+
+            # VARIABLY LAYER FIX: Extracts metrics from the verified old array layers 
+            total_current_cash = np.sum(old_l1_usdc, dtype=np.float64) + np.sum(old_l2_usdc, dtype=np.float64)
+            active_funded_buy_rungs = max(1, int(np.count_nonzero(new_l1_grid < reference_price)) + int(np.count_nonzero(new_l2_grid < reference_price)))
+            
+            # Computes an un-diluted baseline budget based on true incoming cash volumes
+            shared_rung_budget = total_current_cash / active_funded_buy_rungs
+            cash_baselines = (shared_rung_budget, shared_rung_budget)
+
+
+            #cash_baselines = (
+            #    np.sum(l1_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l1_grid < reference_price))),
+            #    np.sum(l2_usdc, dtype=np.float64) / max(1, int(np.count_nonzero(new_l2_grid < reference_price))),
+            #)
         else:
             cash_baselines = state_data.get(
                 "cash_bucket_baselines",
