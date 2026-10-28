@@ -811,45 +811,41 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
             np.float64(2.0) + np.sin(wave_frequency) * np.float64(0.30)
         )
         simulated_price /= np.float64(2.0)
-        
+
         print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
         return simulated_price
 
 
-
-def initialize_live_inventory_matrix(grid_matrix, current_price, live_sol_total: float, live_usdc_total: float):
+def initialize_live_inventory_matrix(grid_matrix: np.ndarray, current_price: float, live_sol_total: float, live_usdc_total: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    PRODUCTION INITIALIZER: Dynamically distributes your true, live on-chain wallet 
-    balances across the active 257 geometric conveyor tiers based on real spot values.
+    PRODUCTION INTERFACE INITIALIZER: Dynamically maps true on-chain ledger asset balances 
+    across the active dual geometric scaling rungs relative to real-time spot entry points.
     """
     current_price = np.float64(current_price)
     live_sol_total = np.float64(live_sol_total)
     live_usdc_total = np.float64(live_usdc_total)
     total_steps = len(grid_matrix)
+    
     sol_inventory = np.zeros(total_steps, dtype=np.float64)
     usdc_inventory = np.zeros(total_steps, dtype=np.float64)
     
-    # Identify which steps are below market (buy lanes) and which are above market (sell lanes)
+    # Isolate rungs relative to market spot boundaries to build bidirectional runway channels
     below_market_indices = np.where(grid_matrix < current_price)[0]
     above_market_indices = np.where(grid_matrix >= current_price)[0]
     
-    # 1. Distribute available stablecoin cash across the buy rungs
+    # 1. Symmetrically fund active buy-side tracks with cash weightings
     buy_steps_count = len(below_market_indices)
     if buy_steps_count > 0 and live_usdc_total > 0:
-        usdc_per_step = live_usdc_total / buy_steps_count
-        for idx in below_market_indices:
-            usdc_inventory[idx] = usdc_per_step
+        usdc_per_step = live_usdc_total / np.float64(buy_steps_count)
+        usdc_inventory[below_market_indices] = usdc_per_step
             
-    # 2. Distribute available base asset inventory across the sell rungs
+    # 2. Symmetrically fund active sell-side short lanes with asset stock
     sell_steps_count = len(above_market_indices)
     if sell_steps_count > 0 and live_sol_total > 0:
-        sol_per_step = live_sol_total / sell_steps_count
-        for idx in above_market_indices:
-            sol_inventory[idx] = sol_per_step
+        sol_per_step = live_sol_total / np.float64(sell_steps_count)
+        sol_inventory[above_market_indices] = sol_per_step
             
-    print(f"[LIVE INVENTORY MATED] True ledger metrics successfully injected across {total_steps} tiers.")
-    print(f"  Live Asset Allocation Base : {np.sum(sol_inventory, dtype=np.float64):.4f} SOL distributed over {sell_steps_count} sell steps.")
-    print(f"  Live Cash Allocation Base  : ${np.sum(usdc_inventory, dtype=np.float64):.2f} USDC distributed over {buy_steps_count} buy steps.")
+    print(f"  [INTERFACE ADAPTER] Mapped vector layer: {np.sum(sol_inventory):.6f} SOL ({sell_steps_count} asks) | ${np.sum(usdc_inventory):.4f} USDC ({buy_steps_count} bids)")
     return sol_inventory, usdc_inventory
 
 
