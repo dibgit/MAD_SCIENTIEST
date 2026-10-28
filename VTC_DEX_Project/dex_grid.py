@@ -262,6 +262,7 @@ def dump_engine_state_cache(
 
 def load_engine_state_cache(current_price: float) -> dict | None:
     """Loads and price-maps cached inventory onto the configured interleaved ladders."""
+
     if not os.path.exists(STATE_CACHE_PATH):
         return None
     try:
@@ -807,8 +808,10 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
             np.float64(2.0) * np.pi / np.float64(60.0)
         )
         simulated_price = real_oracle_price * (
-            np.float64(1.0) + np.sin(wave_frequency) * np.float64(0.30)
+            np.float64(2.0) + np.sin(wave_frequency) * np.float64(0.30)
         )
+        simulated_price /= np.float64(2.0)
+        
         print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
         return simulated_price
 
