@@ -1,4 +1,5 @@
 ================================================================================
+
 LABORATORY SPECIFICATION MANUAL: DECENTRALIZED ASYNC GRID TRADING ENGINE
 Project Root Directory: this file's directory
 Environment Target: Windows 11 (PowerShell Architecture)
@@ -56,3 +57,32 @@ simulation funds. Buy and sell hooks currently use
 `EXECUTION_MODE=MOCK`, report full mock fills for the identified ladder/rung, and
 send no transactions. Live mode is not implemented or enabled.
 ================================================================================
+
+5. RUNNING THE REORGANIZED PROJECT
+The implementation is organized under 'src/vtc_dex/' by responsibility:
+
+  config/          Environment-backed settings
+  domain/          Mesh generation, accounting, and ladder rebalancing
+  integrations/    Solana RPC, Pyth/Jupiter price reads, mock execution
+  security/        Secret access and mock-only execution policy
+  infrastructure/ State cache, CSV ledger, logging, and optional Git backup
+  app/             Application startup, scheduling, and display
+
+Runtime trading records are kept in the project-root 'ledger/' folder:
+
+  ledger/grid_ledger.csv       Transaction and portfolio history
+  ledger/grid_state_cache.json Persistent ladder inventory and engine state
+
+On startup, if either file still exists at the old project-root location and
+its 'ledger/' destination does not exist, the application moves it into the
+new folder. If both copies exist, startup stops rather than overwriting either
+file; reconcile the copies manually before restarting.
+
+The original root-level launcher remains available for compatibility:
+
+  python dex_grid.py
+
+The launcher adds 'src/' to the import path and delegates to the modular
+application. Importing 'dex_grid' also continues to expose the existing
+functions and settings for scripts that used the monolithic module.
+Live transaction signing, broadcasting, and DEX swaps remain unimplemented.

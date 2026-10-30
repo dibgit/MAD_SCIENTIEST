@@ -1,0 +1,207 @@
+VTC DEX GRID TRADING ENGINE
+Development Roadmap
+===================
+
+1. Vision
+---------
+Build a pair-configurable Solana grid-trading application, starting with the
+wVTC/SOL pair and adding other eligible pairs only after their token mints,
+market liquidity, and execution routes have been verified.
+
+Potential future pairs include wVTC/USDC, wVTC/wLTC, and wVTC/wBTC. These are
+examples, not confirmed or currently supported markets. A pair is eligible
+only when both assets are valid on the selected Solana network and a usable
+Raydium pool or supported route has sufficient liquidity.
+
+The project is not currently a live trading bot. It reads wallet balances and
+price data, maintains local grid accounting, and uses mock buy/sell handlers.
+It does not build, sign, or broadcast swap transactions.
+
+2. Current baseline
+-------------------
+- The code has been reorganized under src/vtc_dex/ with separate app, config,
+  domain, integrations, infrastructure, and security packages.
+- Wallet balance reads exist for SOL and USDC.
+- Price/oracle configuration currently includes SOL/USD; the current grid and
+  execution model is not yet a general wVTC/SOL pair implementation.
+- Buy and sell handlers are mock-only and must remain so until the relevant
+  development, security, and test gates below are met.
+
+3. Roadmap principles
+---------------------
+- Keep pair, network, token-mint, pool, and price-source configuration explicit;
+  never infer a token from its ticker or display name.
+- Treat testnet and mainnet as separate configurations. Do not mix mainnet
+  mints, oracle feeds, or pool addresses with testnet RPC endpoints.
+- Use established Solana and Raydium interfaces for transactions and signing;
+  do not implement cryptographic primitives.
+- Keep simulation and mock execution available after live execution is added.
+- Do not enable a pair or live mode merely because a token mint or pool exists:
+  verify liquidity, route behavior, token decimals, and expected transaction
+  costs first.
+- No stage promises profitability. Live trading carries market, execution,
+  liquidity, operational, and key-management risks.
+
+4. Delivery phases
+------------------
+
+Phase 0 - Verify the first market
+Status: Not complete
+
+Before implementing wVTC/SOL execution:
+- Confirm the canonical wVTC SPL mint address, token decimals, issuer/bridge
+  provenance, and supported Solana network.
+- Confirm that a wVTC/SOL Raydium pool or supported route exists on the intended
+  network; record the pool/program identifiers and how they are verified.
+- Check available liquidity, fee tier, price impact, and whether a reliable
+  price source is available for this market.
+- Decide which asset is the base asset and which is the quote asset, and
+  document inventory, price, fee, and portfolio-value units consistently.
+
+Exit criteria: A reviewed first-pair configuration backed by verified network,
+mint, decimals, pool/route, and price-source information. If the market or
+required test environment is unavailable, keep execution mocked and resolve
+that dependency before proceeding.
+
+Phase 1 - Generalize pair and network configuration
+Status: Planned
+
+- Replace hard-coded SOL/USD and SOL/USDC assumptions with explicit pair and
+  network configuration.
+- Represent each asset with its network, mint address, decimals, and display
+  metadata; represent each pair with its base, quote, pool/route, and price
+  source.
+- Validate configuration at startup and reject mismatched network addresses,
+  missing metadata, unsupported pairs, and ambiguous ticker-only settings.
+- Keep application orchestration separate from pair rules and provider
+  integrations.
+
+Exit criteria: The existing mock grid can be initialized for wVTC/SOL from a
+validated configuration, with correct units and no pair-specific assumptions
+leaking into generic accounting code.
+
+Phase 2 - Deterministic simulation and accounting tests
+Status: Planned
+
+- Add unit tests for mesh generation, crossing detection, fills, fees,
+  rebalancing, cache recovery, and inventory conservation.
+- Add deterministic simulated prices and partial fills; make test scenarios
+  reproducible without RPC or exchange access.
+- Store state per network and pair so one market cannot load or overwrite a
+  different market's inventory.
+- Test boundary conditions, stale/missing prices, rounding, insufficient
+  balances, and rejected or partial execution outcomes.
+
+Exit criteria: Automated tests pass for each supported mock pair and verify
+that buys, sells, fees, and persistence preserve the documented accounting
+invariants.
+
+Phase 3 - Read-only market-data and pool integration
+Status: Planned
+
+- Add network-aware Solana RPC and Raydium pool/route discovery adapters.
+- Verify mint ownership, token decimals, pool identity, pool status, and
+  liquidity before accepting a market.
+- Define a price-source policy per pair. Do not assume a Pyth feed exists for
+  wVTC or every future asset; where no suitable independent oracle exists,
+  explicitly evaluate pool-derived pricing and its manipulation/staleness risks.
+- Add freshness checks, rate-limit handling, retry policy, and clear behavior
+  when RPC, pool, or price data is unavailable.
+
+Exit criteria: The application can monitor the configured development market
+without signing or sending transactions, and refuses stale, inconsistent, or
+unverified market data.
+
+Phase 4 - Test-network transaction simulation
+Status: Planned
+
+- Identify whether the chosen Solana test network has the required Raydium
+  program deployment and a suitable pool/route for the test assets.
+- If no usable Raydium test pool exists, use a local validator, controlled
+  mocks, or another explicitly documented test setup; do not treat a mainnet
+  pool as a testnet market.
+- Build unsigned swap transactions through the selected supported adapter and
+  simulate them before any test signing.
+- Validate input/output mints, amounts, minimum output, slippage limits,
+  fees, account constraints, transaction expiry, and failure handling.
+- Test confirmation, timeout, retry, duplicate-submission, and reconciliation
+  behavior with non-production assets and keys.
+
+Exit criteria: End-to-end test transactions have reproducible expected
+outcomes on a verified test environment, and failure cases do not produce
+incorrect local fills or balances.
+
+Phase 5 - Signing boundary and operational safeguards
+Status: Planned
+
+- Isolate signing behind a narrow interface; keep private keys and seed phrases
+  out of source, logs, CSV files, caches, and ordinary configuration examples.
+- Prefer a hardware wallet, protected signer, or other reviewed key-management
+  method appropriate to the deployment. Never add custom cryptography.
+- Require explicit live-mode configuration and fail closed by default.
+- Add per-order and per-session spend limits, pair allowlists, maximum slippage,
+  minimum liquidity checks, a kill switch, and clear operator status.
+- Reconcile confirmed on-chain transactions against local state before
+  recording fills; distinguish submitted, confirmed, failed, and unknown
+  outcomes.
+- Obtain an independent security review and test recovery procedures before
+  enabling any production signer.
+
+Exit criteria: The safeguards are enforced at the execution boundary, tested
+for bypasses and failure modes, and documented for operators.
+
+Phase 6 - Controlled wVTC/SOL pilot
+Status: Planned; blocked on Phases 0-5
+
+- Enable only the verified wVTC/SOL mainnet market, with strict capital and
+  order limits.
+- Begin with supervised, low-value transactions and compare quotes, simulated
+  outcomes, confirmed transactions, fees, and local accounting.
+- Monitor RPC/oracle/pool health, slippage, rejected transactions, inventory,
+  and reconciliation discrepancies; stop automatically on configured limits.
+- Expand limits only after a documented review of observed behavior.
+
+Exit criteria: The pilot meets pre-agreed operational and accounting checks
+over a reviewed observation period. Passing this phase does not imply
+profitability or remove the need for ongoing monitoring.
+
+Phase 7 - Add eligible pairs
+Status: Planned; one pair at a time
+
+Candidate examples:
+- wVTC/USDC
+- wVTC/wLTC
+- wVTC/wBTC
+
+For every candidate, independently verify network, canonical mint addresses,
+decimals, token provenance, Raydium pool/route availability, liquidity,
+pricing methodology, fees, and risk controls. Wrapped assets may have
+additional issuer, bridge, redemption, and depeg risks. Enable each pair only
+after it passes the same simulation, test, security, and operational gates as
+the first market.
+
+Exit criteria: Each pair has its own reviewed configuration and isolated state,
+and can be enabled or disabled without affecting other pairs.
+
+Phase 8 - Reporting and ongoing operations
+Status: Planned; develop alongside earlier phases
+
+- Build an independent ledger/state auditor that compares local records with
+  confirmed chain activity and reports discrepancies without changing state.
+- Add structured health metrics, alerting, log-retention policy, and recovery
+  documentation.
+- Review dependencies, network configuration, key access, and pair status
+  regularly; retain an auditable record of configuration and software changes.
+
+Exit criteria: Operators can detect stale feeds, failed execution, state drift,
+and service outages and can safely pause and resume the engine.
+
+5. Immediate next steps
+-----------------------
+1. Verify the canonical wVTC mint, decimals, intended network, and whether a
+   suitable Raydium wVTC/SOL pool or route is actually available.
+2. Identify a compatible test environment and whether it has the required
+   Raydium deployment and test liquidity.
+3. Define pair/network configuration and per-pair state before adding any
+   transaction-building or signing code.
+4. Keep EXECUTION_MODE=MOCK until the stated phase exit criteria are satisfied.
