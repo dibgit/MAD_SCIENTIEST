@@ -1,0 +1,9 @@
+{
+  "include": [
+    "src",
+    "dex_grid.py"
+  ],
+  "extraPaths": [
+    "src"
+  ]
+}

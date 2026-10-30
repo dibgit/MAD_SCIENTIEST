@@ -1,0 +1,127 @@
+VTC DEX PROJECT
+Implemented Module Architecture
+==========================
+
+Purpose
+-------
+This document describes the implemented organization of the VTC DEX grid
+trading engine. Application orchestration, trading rules, external
+integrations, persistence, and security responsibilities are separated by
+package.
+
+Current implementation note
+----------------------------
+The modular implementation lives under src/vtc_dex/. The root-level dex_grid.py
+is retained as a compatibility launcher and re-exports the existing public
+functions and settings. The engine tracks price crossings and local accounting.
+Swap execution is mocked; live transaction signing and broadcasting are not
+implemented.
+
+Project structure
+--------------------------
+VTC_DEX_Project/
+|
++-- dex_grid.py                       # Compatibility launcher
++-- src/
+|   +-- vtc_dex/
+|       +-- __init__.py
+|       +-- app/
+|       |   +-- __init__.py
+|       |   +-- main.py                 # Application startup and lifecycle
+|       |   +-- scheduler.py            # Price polling and crossing-event loop
+|       |   +-- display.py              # Console ladder-state rendering
+|       |
+|       +-- config/
+|       |   +-- __init__.py
+|       |   +-- settings.py             # Environment settings and project paths
+|       |
+|       +-- domain/
+|       |   +-- __init__.py
+|       |   +-- models.py               # Shared NumPy-backed domain type aliases
+|       |   +-- mesh.py                 # Geometric/arithmetic ladder generation
+|       |   +-- accounting.py           # Inventory initialization and fill accounting
+|       |   +-- rebalancing.py          # Ladder spillover and boundary rules
+|       |
+|       +-- integrations/
+|       |   +-- __init__.py
+|       |   +-- solana_rpc.py           # Solana RPC client and balance queries
+|       |   +-- pyth_oracle.py          # Pyth account decoding and price reads
+|       |   +-- jupiter_price.py        # Optional Jupiter price fallback
+|       |   +-- swap_executor.py        # Mock-only execution hooks
+|       |
+|       +-- security/
+|       |   +-- __init__.py
+|       |   +-- secrets.py              # Environment secret access
+|       |   +-- transaction_policy.py   # Enforces mock-only execution
+|       |
+|       +-- infrastructure/
+|           +-- __init__.py
+|           +-- ledger.py               # CSV persistence and ladder analysis
+|           +-- state_store.py          # Engine state cache loading and saving
+|           +-- logging_setup.py        # Console/file logging and rotation
+|           +-- backup.py               # Optional paced Git backup
+|
++-- data/                               # Runtime logs and local data (not source code)
++-- .env.example                        # Documented, non-secret configuration template
++-- README.txt
++-- Module_View.txt
+
+Module responsibilities and boundaries
+---------------------------------------
+
+1. app
+   Starts and stops the engine, schedules work, and connects configured
+   implementations. It should coordinate modules, not contain trading rules.
+
+2. config
+   Loads settings and validates required values, ranges, and incompatible
+   options at startup. Secrets may be supplied through the environment or an
+   approved secret store; actual secret values must not be committed.
+
+3. domain
+   Contains deterministic trading and accounting rules. It should not depend
+   directly on Solana RPC, HTTP clients, environment variables, or file paths.
+
+4. integrations
+   Adapts external services to interfaces used by the application. Keep RPC
+   communication, oracle decoding, price fallback behavior, and swap execution
+   separate from domain calculations. The default executor should remain a
+   mock until live execution is deliberately implemented and tested.
+
+5. security
+   "Security" is the appropriate module name. Keep secret handling and
+   transaction authorization controls here. Live signing is not implemented.
+   If it is added later, isolate it behind a narrow interface and use
+   established Solana libraries; do not implement cryptographic primitives
+   in this project.
+   Never log private keys, seed phrases, API credentials, or secret-bearing
+   RPC URLs.
+
+6. infrastructure
+   Owns persistence, state serialization, logging, and optional backup
+   mechanics. Trading rules should not depend on these implementation details.
+
+Dependency direction
+--------------------
+app -> domain
+app -> integrations
+app -> infrastructure
+app -> config
+domain -> config (validated business settings only)
+integrations -> domain interfaces/types (where needed)
+infrastructure -> domain interfaces/types (where needed)
+
+The domain must not import app, integrations, or infrastructure. It currently
+reads validated business settings from config; it must not read environment
+variables, file paths, or network services directly. Execution mode is checked
+at application startup. A live signer or transaction-broadcast path does not
+exist; any future live adapter must add an explicit authorization boundary.
+
+Execution
+---------
+Run the application from the project root with:
+
+  python dex_grid.py
+
+The compatibility launcher adds src/ to Python's import path and delegates to
+vtc_dex.app.main. Runtime integrations remain mock-only for trade execution.
