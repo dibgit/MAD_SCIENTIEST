@@ -1,5 +1,7 @@
 """Application startup and engine initialization."""
 
+import asyncio
+
 import numpy as np
 from solana.rpc.async_api import AsyncClient
 
@@ -165,3 +167,10 @@ async def main():
             cash_bucket_baselines=cash_bucket_baselines,
             previous_event_index=previous_event_index,
         )
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[SYSTEM SHUTDOWN] Execution loop terminated by user.")

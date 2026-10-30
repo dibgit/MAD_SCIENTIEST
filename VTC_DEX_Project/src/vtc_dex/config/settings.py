@@ -1,5 +1,6 @@
 """Environment-backed settings and project paths."""
 
+import filecmp
 import os
 from pathlib import Path
 
@@ -70,11 +71,15 @@ for filename in ("grid_ledger.csv", "grid_state_cache.json"):
     ledger_path = os.path.join(LEDGER_DIR, filename)
     if os.path.isfile(legacy_path):
         if os.path.exists(ledger_path):
-            raise FileExistsError(
-                f"Both legacy and ledger copies of {filename} exist; "
-                "reconcile them before starting the engine."
-            )
-        os.replace(legacy_path, ledger_path)
+            if filecmp.cmp(legacy_path, ledger_path, shallow=False):
+                os.remove(legacy_path)
+            else:
+                raise FileExistsError(
+                    f"Both legacy and ledger copies of {filename} exist and "
+                    "differ; reconcile them before starting the engine."
+                )
+        else:
+            os.replace(legacy_path, ledger_path)
 
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 

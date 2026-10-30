@@ -1,5 +1,6 @@
 ================================================================================
 
+
 LABORATORY SPECIFICATION MANUAL: DECENTRALIZED ASYNC GRID TRADING ENGINE
 Project Root Directory: this file's directory
 Environment Target: Windows 11 (PowerShell Architecture)
@@ -75,14 +76,18 @@ Runtime trading records are kept in the project-root 'ledger/' folder:
 
 On startup, if either file still exists at the old project-root location and
 its 'ledger/' destination does not exist, the application moves it into the
-new folder. If both copies exist, startup stops rather than overwriting either
+new folder. If both copies are identical, it removes the redundant root copy.
+If both copies exist but differ, startup stops rather than overwriting either
 file; reconcile the copies manually before restarting.
 
-The original root-level launcher remains available for compatibility:
+Run the modular application directly from the project root in PowerShell:
 
-  python dex_grid.py
+  $env:PYTHONPATH = "$PWD\src"
+  python -m vtc_dex.app.main
 
-The launcher adds 'src/' to the import path and delegates to the modular
-application. Importing 'dex_grid' also continues to expose the existing
-functions and settings for scripts that used the monolithic module.
+Set PYTHONPATH once in a terminal session; after that, repeat the second
+command whenever you want to restart during development. Press Ctrl+C to stop.
+The original root-level 'python dex_grid.py' launcher remains available for
+compatibility. Importing 'dex_grid' also continues to expose its prior
+functions and settings.
 Live transaction signing, broadcasting, and DEX swaps remain unimplemented.
