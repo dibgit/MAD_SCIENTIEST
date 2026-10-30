@@ -32,7 +32,11 @@ def execute_automated_git_vault(tick_id: int, current_step: int, market_price: f
                 "add",
                 os.path.join(project_relative_path, "dex_grid.py"),
                 os.path.join(project_relative_path, "src"),
+<<<<<<< HEAD
                 os.path.join(project_relative_path, "ledger", "grid_ledger.csv"),
+=======
+                os.path.join(project_relative_path, "grid_ledger.csv"),
+>>>>>>> bdad163e186c84d75f8883e2ca21e0546310775e
             ],
             cwd=repo_directory,
             check=True,

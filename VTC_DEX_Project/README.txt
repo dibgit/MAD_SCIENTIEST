@@ -1,5 +1,6 @@
 ================================================================================
 
+
 LABORATORY SPECIFICATION MANUAL: DECENTRALIZED ASYNC GRID TRADING ENGINE
 Project Root Directory: this file's directory
 Environment Target: Windows 11 (PowerShell Architecture)
