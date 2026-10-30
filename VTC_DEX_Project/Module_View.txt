@@ -120,7 +120,7 @@ variables, file paths, or network services directly. Execution mode is checked
 at application startup. A live signer or transaction-broadcast path does not
 exist; any future live adapter must add an explicit authorization boundary.
 
-Execution
+Execution, 
 ---------
 Run the modular application from the project root in PowerShell:
 
@@ -130,6 +130,16 @@ Run the modular application from the project root in PowerShell:
 Set PYTHONPATH once per terminal session. The root-level dex_grid.py remains
 available as a compatibility launcher. Runtime integrations remain mock-only
 for trade execution.
+=======
+Execution as compatibility, 
+---------
+Run the application from the project root with:
+
+  python dex_grid.py
+
+The compatibility launcher adds src/ to Python's import path and delegates to
+vtc_dex.app.main. Runtime integrations remain mock-only for trade execution.
+
 
 VTC DEX PROJECT
 Implemented Module Architecture
