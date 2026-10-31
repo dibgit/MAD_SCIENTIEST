@@ -59,11 +59,14 @@ def execute_conveyor_bucket_spillover(
 
     # SOL surplus moves only toward higher-price rungs in this same ladder.
     asset_index = step_index
-    # Match the SOL cap to the net amount credited when a full USDC bucket is bought.
-    asset_upper_limit = (
+    asset_rung_price = np.float64(grid_matrix[asset_index])
+    asset_cash_limit = (
         CONVEYOR_THRESHOLD_CAP_SOL
-        * (np.float64(1.0) - DEX_EXECUTION_FEE_RATE)
+        * asset_rung_price
         * BUCKET_OVERFLOW_THRESHOLD
+    )
+    asset_upper_limit = (
+        (asset_cash_limit / asset_rung_price) * (np.float64(1.0) - DEX_EXECUTION_FEE_RATE)
     )
     while sol_inventory[asset_index] > asset_upper_limit:
         excess_sol = np.float64(sol_inventory[asset_index] - asset_upper_limit)
@@ -76,6 +79,15 @@ def execute_conveyor_bucket_spillover(
                 f"{excess_sol:.17g} SOL up to Step {upper_step + 1}."
             )
             asset_index = upper_step
+            asset_rung_price = np.float64(grid_matrix[asset_index])
+            asset_cash_limit = (
+                CONVEYOR_THRESHOLD_CAP_SOL
+                * asset_rung_price
+                * BUCKET_OVERFLOW_THRESHOLD
+            )
+            asset_upper_limit = (
+                (asset_cash_limit / asset_rung_price) * (np.float64(1.0) - DEX_EXECUTION_FEE_RATE)
+            )
         else:
             OVERFLOW_VAULT["SOL_DUST"] += excess_sol
             print(
