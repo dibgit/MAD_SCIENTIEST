@@ -43,17 +43,17 @@ def log_transaction_to_csv(
             writer.writerow([
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 loop_id,
-                f"{live_price:.4f}",
+                f"{live_price:.17g}",
                 current_step,
                 direction,
                 steps_moved,
-                f"{l1_sol_total:.6f}",
-                f"{l1_usdc_total:.4f}",
-                f"{l2_sol_total:.6f}",
-                f"{l2_usdc_total:.4f}",
-                f"{OVERFLOW_VAULT['SOL_DUST']:.6f}",
-                f"{OVERFLOW_VAULT['USDC_DUST']:.4f}",
-                f"{portfolio_value:.4f}"
+                f"{l1_sol_total:.17g}",
+                f"{l1_usdc_total:.17g}",
+                f"{l2_sol_total:.17g}",
+                f"{l2_usdc_total:.17g}",
+                f"{OVERFLOW_VAULT['SOL_DUST']:.17g}",
+                f"{OVERFLOW_VAULT['USDC_DUST']:.17g}",
+                f"{portfolio_value:.17g}"
             ])
     except Exception as e:
         print(f"[ERROR] CSV Database Multi-Grid Write Failure: {e}")

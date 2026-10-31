@@ -20,7 +20,7 @@ def execute_automated_git_vault(tick_id: int, current_step: int, market_price: f
         
     repo_directory = os.path.dirname(PROJECT_DIR)
     project_relative_path = os.path.relpath(PROJECT_DIR, repo_directory)
-    commit_message = f"Vault Update: Tick #{tick_id} | Active Step: {current_step} | Market Benchmark: ${market_price:.2f}"
+    commit_message = f"Vault Update: Tick #{tick_id} | Active Step: {current_step} | Market Benchmark: ${market_price:.17g}"
     
     print(f"[GIT VAULT] System cooldown cleared ({int(elapsed_time)}s elapsed). Initializing background sync...")
     

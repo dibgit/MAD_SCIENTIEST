@@ -43,7 +43,7 @@ def execute_conveyor_bucket_spillover(
             usdc_inventory[lower_step] += excess_cash
             print(
                 f"[CASH CONVEYOR] Step {cash_index + 1} sent "
-                f"${excess_cash:.4f} USDC down to Step {lower_step + 1}."
+                f"${excess_cash:.17g} USDC down to Step {lower_step + 1}."
             )
             cash_index = lower_step
             # Recalculate cash limit for the lower step to keep the loop mathematically bounded
@@ -52,7 +52,7 @@ def execute_conveyor_bucket_spillover(
             OVERFLOW_VAULT["USDC_DUST"] += excess_cash
             print(
                 f"[CASH FLOOR VAULTED] Step 1 reached the lower boundary; "
-                f"vaulted ${excess_cash:.4f} USDC."
+                f"vaulted ${excess_cash:.17g} USDC."
             )
             break
 
@@ -67,14 +67,14 @@ def execute_conveyor_bucket_spillover(
             sol_inventory[upper_step] += excess_sol
             print(
                 f"[SOL CONVEYOR] Step {asset_index + 1} sent "
-                f"{excess_sol:.8f} SOL up to Step {upper_step + 1}."
+                f"{excess_sol:.17g} SOL up to Step {upper_step + 1}."
             )
             asset_index = upper_step
         else:
             OVERFLOW_VAULT["SOL_DUST"] += excess_sol
             print(
                 f"[SOL CEILING VAULTED] Step {asset_index + 1} reached the upper "
-                f"boundary; vaulted {excess_sol:.8f} SOL."
+                f"boundary; vaulted {excess_sol:.17g} SOL."
             )
             break
 

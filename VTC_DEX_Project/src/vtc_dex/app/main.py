@@ -7,10 +7,8 @@ from solana.rpc.async_api import AsyncClient
 
 from vtc_dex.config.settings import (
     EXECUTION_MODE,
-    INITIAL_ALLOCATION_USDC,
     INVENTORY_MODE,
     OVERFLOW_VAULT,
-    RUN_SIMULATION_PRICE_SHIFTER,
     rpc_url,
 )
 from vtc_dex.domain.accounting import initialize_live_inventory_matrix
@@ -40,10 +38,6 @@ async def main():
     print("[SYSTEM START] Starting the two-ladder SOL/USDC price monitor")
     print(f"[INVENTORY MODE] {INVENTORY_MODE}.")
     print("[ACCOUNTING MODE] Mock fills update local inventory only; no swaps are broadcast.")
-    print(
-        "[PRICE MODE] Synthetic price shifter is "
-        f"{'enabled' if RUN_SIMULATION_PRICE_SHIFTER else 'disabled'}."
-    )
     print("[EXECUTION MODE] MOCK fills only; no swap transactions are signed or sent.")
 
     async with AsyncClient(rpc_url) as client:
@@ -59,22 +53,16 @@ async def main():
             print("[CRITICAL] Initial price contract synchronization failed. Aborting initialization.")
             return
 
-        # --- PHASE 1 ADAPTER BRIDGE ROW: UNIFIED LEDGER INTERROGATION ---
-        if RUN_SIMULATION_PRICE_SHIFTER:
-            # SHADOW SIMULATION MODE: Mimic true hardware wallets by populating an authentic asset base
-            print(f"[INTERFACE ADAPTER] Engagement Mode: LABORATORY SHADOW WALLET SIMULATION.")
-            live_usdc = INITIAL_ALLOCATION_USDC * np.float64(0.5)
-            live_sol = (INITIAL_ALLOCATION_USDC * np.float64(0.5)) / calibrated_boot_price
-        else:
-            # LIVE PRODUCTION MODE: Execute absolute cryptograph balance scans straight from Web3 nodes
-            print(f"[INTERFACE ADAPTER] Engagement Mode: LIVE PRODUCTION WALLET MONITORING.")
-            live_sol = await fetch_live_token_balance(client, "SOL")
-            live_usdc = await fetch_live_token_balance(client, "USDC")
-            
-            if live_sol <= 0 and live_usdc <= 0:
-                print("[CRITICAL] Interrogated on-chain wallet balance holds 0 assets. Halting engine.")
-                return
-        # ----------------------------------------------------------------
+        live_sol = await fetch_live_token_balance(
+            client, "SOL", calibrated_boot_price
+        )
+        live_usdc = await fetch_live_token_balance(
+            client, "USDC", calibrated_boot_price
+        )
+
+        if live_sol <= 0 and live_usdc <= 0:
+            print("[CRITICAL] Interrogated balance holds 0 assets. Halting engine.")
+            return
 
         if calibrated_boot_price is None or not np.isfinite(calibrated_boot_price) or calibrated_boot_price <= 0:
             print("[CRITICAL] Price calibration failed; the ladders were not initialized.")
@@ -129,12 +117,12 @@ async def main():
         previous_event_index = int(np.abs(merged_prices - calibrated_boot_price).argmin())
         print(
             f"[LADDERS READY] L1/L2 rungs: {len(l1_grid)} each; "
-            f"combined crossing levels: {len(merged_prices)}; anchor: ${anchor_price:,.4f}."
+            f"combined crossing levels: {len(merged_prices)}; anchor: ${anchor_price:,.17g}."
         )
         print(
             f"[INVENTORY] L1+L2 totals: "
-            f"{np.sum(l1_sol_stock, dtype=np.float64) + np.sum(l2_sol_stock, dtype=np.float64):.8f} SOL, "
-            f"${np.sum(l1_usdc_stock, dtype=np.float64) + np.sum(l2_usdc_stock, dtype=np.float64):.4f} USDC."
+            f"{np.sum(l1_sol_stock, dtype=np.float64) + np.sum(l2_sol_stock, dtype=np.float64):.17g} SOL, "
+            f"${np.sum(l1_usdc_stock, dtype=np.float64) + np.sum(l2_usdc_stock, dtype=np.float64):.17g} USDC."
         )
 
         dump_engine_state_cache(

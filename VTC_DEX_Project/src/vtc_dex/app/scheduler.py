@@ -35,8 +35,8 @@ def scan_price_crossings(
     if live_price > merged_prices[previous_event_index]:
         print(
             f"[TICK {loop_counter}] Price has risen above the previous level; "
-            f"scanning upward for crossings. Live Price = ${live_price:,.4f}, "
-            f"Previous Level = ${merged_prices[previous_event_index]:,.4f}"
+            f"scanning upward for crossings. Live Price = ${live_price:,.17g}, "
+            f"Previous Level = ${merged_prices[previous_event_index]:,.17g}"
         )
         while (
             current_event_index < len(merged_prices) - 1
@@ -46,8 +46,8 @@ def scan_price_crossings(
     elif live_price < merged_prices[previous_event_index]:
         print(
             f"[TICK {loop_counter}] Price has fallen below the previous level; "
-            f"scanning downward for crossings. Live Price = ${live_price:,.4f}, "
-            f"Previous Level = ${merged_prices[previous_event_index]:,.4f}"
+            f"scanning downward for crossings. Live Price = ${live_price:,.17g}, "
+            f"Previous Level = ${merged_prices[previous_event_index]:,.17g}"
         )
         while (
             current_event_index > 0
@@ -91,7 +91,7 @@ async def run_engine_loop(
 
         if current_event_index == previous_event_index:
             print(
-                f"[TICK {loop_counter}] Price ${live_price:,.4f} remains near combined level "
+                f"[TICK {loop_counter}] Price ${live_price:,.17g} remains near combined level "
                 f"{current_event_index + 1}/{len(merged_prices)}."
             )
             await asyncio.sleep(3)
@@ -157,7 +157,7 @@ async def run_engine_loop(
         total_usdc = np.sum(l1_usdc_stock, dtype=np.float64) + np.sum(
             l2_usdc_stock, dtype=np.float64
         )
-        print(f"[PORTFOLIO MODEL] {total_sol:.8f} SOL + ${total_usdc:,.4f} USDC")
+        print(f"[PORTFOLIO MODEL] {total_sol:.17g} SOL + ${total_usdc:,.17g} USDC")
         print_interleaved_ladder_state(
             loop_counter,
             l1_grid,

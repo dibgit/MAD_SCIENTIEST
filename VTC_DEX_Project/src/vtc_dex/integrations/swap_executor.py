@@ -7,7 +7,7 @@ def execute_live_onchain_sell(
     """Mock sell interface; replace its body with a confirmed DEX adapter later."""
     print(
         f"[MOCK EXECUTION] L{layer_index + 1} rung {rung_index + 1}: "
-        f"SELL {amount_in_sol:.8f} SOL near ${target_price:.4f}; no transaction sent."
+        f"SELL {amount_in_sol:.17g} SOL near ${target_price:.17g}; no transaction sent."
     )
     return 1.0
 
@@ -21,7 +21,7 @@ def execute_live_onchain_buy(
     """Mock buy interface; replace its body with a confirmed DEX adapter later."""
     print(
         f"[MOCK EXECUTION] L{layer_index + 1} rung {rung_index + 1}: "
-        f"BUY with ${amount_in_usdc:.4f} USDC near ${target_price:.4f}; "
+        f"BUY with ${amount_in_usdc:.17g} USDC near ${target_price:.17g}; "
         "no transaction sent."
     )
     return 1.0

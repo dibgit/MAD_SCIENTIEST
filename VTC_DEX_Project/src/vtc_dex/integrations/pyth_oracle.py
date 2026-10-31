@@ -83,20 +83,20 @@ async def fetch_onchain_price(client: AsyncClient, pair_ticker: str = "SOL/USD")
                 if spot_price is not None:
                     print(
                         f"[JUPITER TICK] {pair_ticker} Active Working Value: "
-                        f"${spot_price:.4f}"
+                        f"${spot_price:.17g}"
                     )
 
                     ORACLE_STAGNANT_TRACKER["last_price"] = spot_price
                     ORACLE_STAGNANT_TRACKER["flatline_count"] = 0
                     print(
                         f"[JUPITER TICK] {pair_ticker} Active Working Value: "
-                        f"${spot_price:,.4f}"
+                        f"${spot_price:,.17g}"
                     )
                     return spot_price
                     
         # Return the last known verified price out of our secure cache
         active_working_price = ORACLE_STAGNANT_TRACKER["last_price"]
-        print(f"[ORACLE TICK] {pair_ticker} Active Working Value: ${active_working_price:,.4f}")
+        print(f"[ORACLE TICK] {pair_ticker} Active Working Value: ${active_working_price:,.17g}")
         return active_working_price
         
     except Exception as e:

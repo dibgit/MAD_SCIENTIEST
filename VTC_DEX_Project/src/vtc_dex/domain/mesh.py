@@ -103,11 +103,11 @@ def generate_infinite_interleaved_matrix(
 
     print(
         f"[INTERLEAVE INITIALIZED] Ladder 1: {len(l1_flat)} rungs "
-        f"(${float(l1_flat[0]):,.4f}-${float(l1_flat[-1]):,.4f})"
+        f"(${float(l1_flat[0]):,.17g}-${float(l1_flat[-1]):,.17g})"
     )
     print(
         f"[INTERLEAVE INITIALIZED] Ladder 2: {len(l2_flat)} rungs "
-        f"(${float(l2_flat[0]):,.4f}-${float(l2_flat[-1]):,.4f})"
+        f"(${float(l2_flat[0]):,.17g}-${float(l2_flat[-1]):,.17g})"
     )
     return l1_grid, l2_grid
 
@@ -151,7 +151,7 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
     real_oracle_price = np.float64(real_oracle_price)
     
     # STRUCTURAL DEBUG TOGGLE: Set to True to engage precision threshold switching
-    DEBUG_0 = False
+    DEBUG_0 = True
 
     if DEBUG_0:
         # Precision Switch Lane: Flips strictly between the exact Buy and Sell anchors of L1 Rung 1
@@ -171,7 +171,7 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
             #simulated_price = np.float64(138.250544)  #target price for L1 rung 12 sell--> OK
             simulated_price = np.float64(141.076547)  #target price for L2 rung 12 sell--> OK
 
-        print(f"[DEBUG_0 ACTIVE] Loop Counter: {current_tick} | Forced Target Price: ${simulated_price:.6f}")
+        print(f"[DEBUG_0 ACTIVE] Loop Counter: {current_tick} | Forced Target Price: ${simulated_price:.17g}")
         return simulated_price
 
     else:
@@ -187,5 +187,5 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
         )
         simulated_price /= np.float64(2.0)
 
-        print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.4f}")
+        print(f"[SIMULATION SHIFTER] Local accounting price: ${simulated_price:,.17g}")
         return simulated_price

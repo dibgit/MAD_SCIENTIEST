@@ -35,13 +35,13 @@ def print_interleaved_ladder_state(
             np.float64(1.0) + MIN_ROUND_TRIP_GAP_PCT
         )
         l1_row = (
-            f"{rung_index + 1:4d} | {l1_buy_price:19.6f} | "
-            f"{l1_usdc[rung_index]:15.2f} | {l1_sell_price:21.6f} | "
-            f"{l1_sol[rung_index]:14.4f}"
+            f"{rung_index + 1:4d} | {l1_buy_price:>23.17g} | "
+            f"{l1_usdc[rung_index]:>23.17g} | {l1_sell_price:>23.17g} | "
+            f"{l1_sol[rung_index]:>23.17g}"
         )
         l2_row = (
-            f"{rung_index + 1:4d} | {l2_buy_price:19.6f} | "
-            f"{l2_usdc[rung_index]:15.2f} | {l2_sell_price:21.6f} | "
-            f"{l2_sol[rung_index]:14.4f}"
+            f"{rung_index + 1:4d} | {l2_buy_price:>23.17g} | "
+            f"{l2_usdc[rung_index]:>23.17g} | {l2_sell_price:>23.17g} | "
+            f"{l2_sol[rung_index]:>23.17g}"
         )
         print(f"{l1_row} || {l2_row}")

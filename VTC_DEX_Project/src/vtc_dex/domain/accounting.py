@@ -36,7 +36,7 @@ def initialize_live_inventory_matrix(grid_matrix: np.ndarray, current_price: flo
         sol_per_step = live_sol_total / np.float64(sell_steps_count)
         sol_inventory[above_market_indices] = sol_per_step
             
-    print(f"  [INTERFACE ADAPTER] Mapped vector layer: {np.sum(sol_inventory):.6f} SOL ({sell_steps_count} asks) | ${np.sum(usdc_inventory):.4f} USDC ({buy_steps_count} bids)")
+    print(f"  [INTERFACE ADAPTER] Mapped vector layer: {np.sum(sol_inventory):.17g} SOL ({sell_steps_count} asks) | ${np.sum(usdc_inventory):.17g} USDC ({buy_steps_count} bids)")
     return sol_inventory, usdc_inventory
 
 
@@ -75,9 +75,9 @@ def initialize_simulation_inventory(
         cash_baselines.append(np.float64(bucket_budget))
 
     print(
-        f"[SIMULATION INVENTORY] Allocated ${total_budget_usdc:,.2f} total across "
-        f"L1+L2 at ${current_price:,.4f}; "
-        f"${bucket_budget:,.4f} budget per rung."
+        f"[SIMULATION INVENTORY] Allocated ${total_budget_usdc:,.17g} total across "
+        f"L1+L2 at ${current_price:,.17g}; "
+        f"${bucket_budget:,.17g} budget per rung."
     )
     return (*inventories, tuple(cash_baselines))
 
@@ -134,9 +134,9 @@ def apply_interleaved_crossing(
         usdc_stock[rung_index] += usdc_received
         print(
             f"  [FILL ACCOUNTING] L{layer_index + 1} rung {rung_index + 1} "
-            f"sold {sol_sold:.8f} SOL at ${rung_price:.4f}; "
-            f"credited ${usdc_received:.4f} USDC "
-            f"({fill_fraction:.1%} fill; fee included)."
+            f"sold {sol_sold:.17g} SOL at ${rung_price:.17g}; "
+            f"credited ${usdc_received:.17g} USDC "
+            f"({fill_fraction:.17g} fill fraction / {fill_fraction:.1%}; fee included)."
         )
     elif direction == "DOWNWARD" and usdc_stock[rung_index] > 0:
         available_usdc = np.float64(usdc_stock[rung_index])
@@ -161,9 +161,9 @@ def apply_interleaved_crossing(
         sol_stock[rung_index] += sol_received
         print(
             f"  [FILL ACCOUNTING] L{layer_index + 1} rung {rung_index + 1} "
-            f"spent ${usdc_spent:.4f} at ${rung_price:.4f}; "
-            f"credited {sol_received:.8f} SOL "
-            f"({fill_fraction:.1%} fill; fee included)."
+            f"spent ${usdc_spent:.17g} at ${rung_price:.17g}; "
+            f"credited {sol_received:.17g} SOL "
+            f"({fill_fraction:.17g} fill fraction / {fill_fraction:.1%}; fee included)."
         )
     else:
         return

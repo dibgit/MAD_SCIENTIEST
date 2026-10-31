@@ -3,14 +3,46 @@ from solana.rpc.async_api import AsyncClient
 from solana.rpc.core import TokenAccountOpts
 from solders.pubkey import Pubkey
 
-from vtc_dex.config.settings import TOKEN_MINTS, wallet_address_str
+from vtc_dex.config.settings import (
+    INITIAL_ALLOCATION_USDC,
+    RUN_SIMULATION_PRICE_SHIFTER,
+    TOKEN_MINTS,
+    wallet_address_str,
+)
+
+SIMULATED_BALANCE_RATIO = 0.5
+if not 0 < SIMULATED_BALANCE_RATIO < 1:
+    raise ValueError("SIMULATED_BALANCE_RATIO must be greater than 0 and less than 1.")
 
 
-async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> float:
+async def fetch_live_token_balance(
+    client: AsyncClient,
+    token_ticker: str,
+    calibrated_boot_price: float | None = None,
+) -> float:
     """
-    Programmatically queries the live Solana blockchain ledger via RPC.
-    Natively supports System Account SOL and derives Associated Token Accounts for SPL tokens.
+    Returns the configured simulation allocation or queries the live Solana ledger.
     """
+    if RUN_SIMULATION_PRICE_SHIFTER:
+        if token_ticker == "SOL":
+            if (
+                calibrated_boot_price is None
+                or not np.isfinite(calibrated_boot_price)
+                or calibrated_boot_price <= 0
+            ):
+                raise ValueError(
+                    "A finite positive calibrated_boot_price is required "
+                    "to calculate the simulated SOL balance."
+                )
+            return np.float64(
+                (INITIAL_ALLOCATION_USDC * np.float64(SIMULATED_BALANCE_RATIO))
+                / calibrated_boot_price
+            )
+        if token_ticker == "USDC":
+            return np.float64(
+                INITIAL_ALLOCATION_USDC * np.float64(1 - SIMULATED_BALANCE_RATIO)
+            )
+
     if not wallet_address_str:
         print(f"[ERROR] Cannot fetch {token_ticker}: MY_PUBLIC_WALLET missing from .env.")
         return 0.0
@@ -23,7 +55,7 @@ async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> fl
         if token_ticker == "SOL":
             balance_response = await client.get_balance(owner_pubkey)
             live_sol_balance = np.float64(balance_response.value) / np.float64(1_000_000_000)
-            print(f"[BALANCE CHECK] Live SOL Balance Confirmed: {live_sol_balance:,.4f} SOL")
+            print(f"[BALANCE CHECK] Live SOL Balance Confirmed: {live_sol_balance:,.17g} SOL")
             return np.float64(live_sol_balance)
         # --------------------------------------------------------------------------
 
@@ -52,7 +84,7 @@ async def fetch_live_token_balance(client: AsyncClient, token_ticker: str) -> fl
         balance_response = await client.get_token_account_balance(account_pubkey)
         if balance_response.value:
             live_balance = np.float64(balance_response.value.ui_amount)
-            print(f"[BALANCE CHECK] Live {token_ticker} Balance Confirmed: {live_balance:,.4f} tokens")
+            print(f"[BALANCE CHECK] Live {token_ticker} Balance Confirmed: {live_balance:,.17g} tokens")
             return live_balance
             
         return 0.0

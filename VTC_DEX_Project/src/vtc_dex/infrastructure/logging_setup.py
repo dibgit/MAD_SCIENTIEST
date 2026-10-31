@@ -142,16 +142,16 @@ def log_ladder_state_isolated(
     ladder_state_logger.info(f"=== [GRID_SNAPSHOT_START] Trigger: {context_trigger} ===")
     ladder_state_logger.info(f"Current Matrix Focus Index Layer: Step #{current_tier + 1}")
     ladder_state_logger.info(
-        f"[PORTFOLIO AUDIT] Price=${market_price:.4f} | "
-        f"L1={l1_sol_total:.8f} SOL / ${l1_usdc_total:.4f} USDC | "
-        f"L2={l2_sol_total:.8f} SOL / ${l2_usdc_total:.4f} USDC | "
-        f"Total incl. vault={total_sol:.8f} SOL / ${total_usdc:.4f} USDC | "
-        f"Estimated fund=${estimated_fund_usd:.4f}"
+        f"[PORTFOLIO AUDIT] Price=${market_price:.17g} | "
+        f"L1={l1_sol_total:.17g} SOL / ${l1_usdc_total:.17g} USDC | "
+        f"L2={l2_sol_total:.17g} SOL / ${l2_usdc_total:.17g} USDC | "
+        f"Total incl. vault={total_sol:.17g} SOL / ${total_usdc:.17g} USDC | "
+        f"Estimated fund=${estimated_fund_usd:.17g}"
     )
     ladder_state_logger.info(
         f"{'Step':<5} | "
-        f"{'L1 Price':<11} | {'L1 SOL':<10} | {'L1 USDC':<10} || "
-        f"{'L2 Price':<11} | {'L2 SOL':<10} | {'L2 USDC':<10}"
+        f"{'L1 Price':<23} | {'L1 SOL':<23} | {'L1 USDC':<23} || "
+        f"{'L2 Price':<23} | {'L2 SOL':<23} | {'L2 USDC':<23}"
     )
     ladder_state_logger.info("-" * 95)
     
@@ -159,11 +159,11 @@ def log_ladder_state_isolated(
         # Tracking both structures cleanly using relative row indexing markers
         ladder_state_logger.info(
             f"#{i+1:03d} | "
-            f"{l1_grid[i]:<11.4f} | {l1_sol[i]:<10.4f} | ${l1_usdc[i]:<9.2f} || "
-            f"{l2_grid[i]:<11.4f} | {l2_sol[i]:<10.4f} | ${l2_usdc[i]:<9.2f}"
+            f"{l1_grid[i]:>23.17g} | {l1_sol[i]:>23.17g} | ${l1_usdc[i]:>22.17g} || "
+            f"{l2_grid[i]:>23.17g} | {l2_sol[i]:>23.17g} | ${l2_usdc[i]:>22.17g}"
         )
     ladder_state_logger.info(
         f"Overflow Vault Account Balances: "
-        f"{OVERFLOW_VAULT['SOL_DUST']:.6f} SOL | ${OVERFLOW_VAULT['USDC_DUST']:.4f} USDC"
+        f"{OVERFLOW_VAULT['SOL_DUST']:.17g} SOL | ${OVERFLOW_VAULT['USDC_DUST']:.17g} USDC"
     )
     ladder_state_logger.info("=== [GRID_SNAPSHOT_END] ===")
