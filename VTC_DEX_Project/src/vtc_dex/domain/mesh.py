@@ -163,7 +163,7 @@ def get_simulated_price(real_oracle_price: float, current_tick: int) -> float:
             #simulated_price = np.float64(128.393495)  #target price for L2 rung 9 buy--> OK
             #simulated_price = np.float64(136.391924)  #target price for L1 rung 12 buy--> OK
             #simulated_price = np.float64(139.179935)  #target price for L2 rung 12 buy--> OK
-            simulated_price = np.float64(119.233781)
+            simulated_price = np.float64(119.23375)
         else:
             #simulated_price = np.float64(102.851417) #target price for L1 rung 1 sell-->OK
             #simulated_price = np.float64(127.536132) #target price for L1 rung 9 sell-->OK
