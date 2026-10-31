@@ -3,6 +3,7 @@ import numpy as np
 from vtc_dex.config.settings import (
     BUCKET_OVERFLOW_THRESHOLD,
     CONVEYOR_THRESHOLD_CAP_SOL,
+    DEX_EXECUTION_FEE_RATE,
     OVERFLOW_VAULT,
 )
 
@@ -58,7 +59,12 @@ def execute_conveyor_bucket_spillover(
 
     # SOL surplus moves only toward higher-price rungs in this same ladder.
     asset_index = step_index
-    asset_upper_limit = CONVEYOR_THRESHOLD_CAP_SOL * BUCKET_OVERFLOW_THRESHOLD
+    # Match the SOL cap to the net amount credited when a full USDC bucket is bought.
+    asset_upper_limit = (
+        CONVEYOR_THRESHOLD_CAP_SOL
+        * (np.float64(1.0) - DEX_EXECUTION_FEE_RATE)
+        * BUCKET_OVERFLOW_THRESHOLD
+    )
     while sol_inventory[asset_index] > asset_upper_limit:
         excess_sol = np.float64(sol_inventory[asset_index] - asset_upper_limit)
         sol_inventory[asset_index] = asset_upper_limit
