@@ -1,7 +1,7 @@
 {
-    "timestamp": "2026-11-01 01:07:51",
+    "timestamp": "2026-11-01 01:12:51",
     "base_anchor_price": 119.23378,
-    "loop_counter": 13556,
+    "loop_counter": 14692,
     "number_of_ladder": 25,
     "inventory_mode": "SIMULATION",
     "l1_sol_stock": [
@@ -114,7 +114,7 @@
     ],
     "overflow_vault_state": {
         "SOL_DUST": 0.0,
-        "USDC_DUST": 159.79694776592237
+        "USDC_DUST": 220.74925610192008
     },
     "cash_bucket_baselines": [
         20.833333333333332,
